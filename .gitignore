@@ -1,0 +1,11 @@
+build/
+*\.swp
+out
+err
+Makefile
+callgrind*
+Makefile
+*.tmp
+*.gz
+massif*
+vgcore*

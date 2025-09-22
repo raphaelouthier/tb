@@ -11,7 +11,7 @@
  */
 #define TB_ORD_CMP(fld, ...) { \
 	if (ord0->fld != ord1->fld) { \
-		error("orders have different "__VA_ARGS__);
+		error("orders have different "__VA_ARGS__); \
 		return 1; \
 	} \
 }
@@ -28,10 +28,8 @@ uerr tb_ord_cmp_req(
 {
 
 	/* Compare instruments. */
-	TB_ORD_CMP(ist, "instruments : '%@' and '%@'.\n", tb_ist_dsc(ord0->ist), tb_ist_dsc(ord1->ist)); \
-
-	/* Compare currencies. */
-	TB_ORD_CMP(ccy, "currencies : '%@' and '%@'.\n", tb_ccy_dsc(ord0->ccy), tb_ccy_dsc(ord1->ccy)); \
+	TB_ORD_CMP(prm, "primary : '%@' and '%@'.\n", tb_ist_dsc(ord0->prm), tb_ist_dsc(ord1->prm)); \
+	TB_ORD_CMP(sec, "secondary : '%@' and '%@'.\n", tb_ist_dsc(ord0->sec), tb_ist_dsc(ord1->sec)); \
 
 	/* Compare types. */
 	TB_ORD_CMP(typ, "types : '%u' and '%u'.\n", ord0->typ, ord1->typ); \
@@ -40,7 +38,7 @@ uerr tb_ord_cmp_req(
 	TB_ORD_CMP(req_vol_prm, "request volume : '%d' and '%d'.\n", ord0->req_vol_prm, ord1->req_vol_prm);
 
 	/* Compare limit prices. */
-	const u8 typ = ord0->ccy;
+	const u8 typ = ord0->typ;
 	if (TB_ORD_TYP_HAS_LIM(typ)) {
 		TB_ORD_CMP(req_prc_lim, "request limit prices : '%d' and '%d'.\n", ord0->req_prc_lim, ord1->req_prc_lim);
 	}
@@ -53,9 +51,11 @@ uerr tb_ord_cmp_req(
 	return 0;
 }
 
+/*
  * Compare @ord0 and @ord1.
  * If they are the same, return 0.
  * If they differ, return 1.
+ */
 uerr tb_ord_cmp(
 	tb_ord *ord0,
 	tb_ord *ord1
@@ -127,10 +127,11 @@ void tb_ord_log(
 	const char *sts_dsc = _sts_dscs[sts]; 
 
 	/* Log the main descriptors. */
-	ns_stm_writef(stm, "(%@, %s, %s, %@, (vol %d", 
-		tb_ist_dsc(ord->ist),
+	ns_stm_writef(stm, "(%@, %@, %s, %s, (vol %d", 
+		tb_ist_dsc(ord->prm),
+		tb_ist_dsc(ord->sec),
+		typ_dsc,
 		sts_dsc,
-		tb_ccy_dsc(ord->ccy),
 		ord->req_vol_prm
 	);
 
@@ -144,7 +145,7 @@ void tb_ord_log(
 	ns_stm_write(stm, ")", 1);
 
 	/* Log the response if complete. */
-	if (sts == TB_ORD_TYP_CPL) {
+	if (sts == TB_ORD_STS_CPL) {
 		ns_stm_writef(stm, "-> (vol %d, ttl %d)", ord->rsp_vol_prm, ord->rsp_vol_sec);
 	}
 	ns_stm_write(stm, ")", 1);
@@ -157,8 +158,8 @@ void tb_ord_log(
 /*
  * Check that @cdt is met, otherwise log and return 1.
  */
-#define TB_ORD_VAL(cdt, ...) } \
-	if ((!cdt)) { \
+#define TB_ORD_VAL(cdt, ...) { \
+	if (!(cdt)) { \
 		error("invalid order status '%u'.\n", sts); \
 		return 1; \
 	} \
@@ -175,7 +176,7 @@ uerr tb_ord_val_(
 {
 
 	/* Validate status. */
-	TB_ORD_VAL(sts <= TB_ORD_TYP_CPL, "invalid order status '%u'.\n", sts);
+	TB_ORD_VAL(sts <= TB_ORD_STS_CPL, "invalid order status '%u'.\n", sts);
 
 	/* Validate request volume. */
 	TB_ORD_VAL (ord->req_vol_prm > 0, "order invalid : asked for volume '%d' <= 0.\n");
@@ -190,7 +191,7 @@ uerr tb_ord_val_(
 	}
 
 	/* Validate response data. */
-	if (sts == TB_ORD_TYP_CPL) {
+	if (sts == TB_ORD_STS_CPL) {
 		TB_ORD_VAL(ord->rsp_vol_prm >= 0, "response volume '%@' <= 0.\n", ord->rsp_vol_prm);
 		TB_ORD_VAL(ord->rsp_vol_sec >= 0, "response total '%@' <= 0.\n", ord->rsp_vol_sec);
 	}

@@ -29,7 +29,7 @@ void _ast_log(
 )
 {
 	tb_ast *ast = va_arg(*args, tb_ast *);
-	ns_stm_writef(stm, "asset (%@, %d)", tb_ist_dsc(_ast_ist(ast)), ast->amt));
+	ns_stm_writef(stm, "asset (%@, %d)", tb_ist_dsc(_ast_ist(ast)), ast->amt);
 }
 #define _ast_dsc(ast) &_ast_log, ast
 
@@ -125,7 +125,7 @@ static inline uerr _ast_rem_(
 )
 {
 	_ast_chk(wlt, ast);
-	const f64 dif = tb_amt_dif(ast->amt, amt);
+	const f64 dif = ast->amt - amt;
 	_wlt_log("[%p] ast_add %@ : %d -> %d : %s.\n", wlt, tb_ist_dsc(_ast_ist(ast)), ast->amt, dif, (dif < 0) ? "error (< 0)" : "OK");
 	if (dif < 0) return 1;
 	ast->amt = dif;
@@ -143,7 +143,7 @@ static inline uerr _ast_rem_(
 static inline void _ast_add(
 	tb_wlt *wlt,
 	tb_ist *ist,
-	tb_amt amt
+	f64 amt
 )
 {
 	check(amt >= 0);
@@ -162,13 +162,13 @@ static inline void _ast_add(
 static inline uerr _ast_rem(
 	tb_wlt *wlt,
 	tb_ist *ist,
-	tb_amt amt
+	f64 amt
 )
 {
 	check(amt >= 0);
 	tb_ast *ast = _ast_sch(wlt, ist);
 	if (!ast) return (amt == 0);
-	else return _ast_rem_(wlt, ist, amt);
+	else return _ast_rem_(wlt, ast, amt);
 }
 
 /*************
@@ -216,7 +216,7 @@ tb_wlt *tb_wlt_cln(
 	_wlt_log("[%p] : cln : %p.\n", src, dst);
 	tb_ast *ast;
 	ns_map_fe(ast, &src->asts, asts, uad, post) {
-		_ast_ctor(dst, ast->asts.value, _ast_ist(ast), ast->amt);
+		_ast_ctr(dst, _ast_ist(ast), ast->amt);
 	}
 	return dst;
 
@@ -263,7 +263,7 @@ uerr tb_wlt_cmp(
 	/* Compare assets. */
 	tb_ast *ast0;
 	tb_ast *ast1 = _map_entry(ns_map_uad_fi_post(&wlt1->asts), tb_ast, asts);
-	ns_map_fe(ast0, &wlt0->asts, asts, uas, post) {
+	ns_map_fe(ast0, &wlt0->asts, asts, uad, post) {
 		_ast_chk(wlt0, ast0);
 		_ast_chk(wlt1, ast1);
 		check(ast0);
@@ -275,7 +275,7 @@ uerr tb_wlt_cmp(
 			error("wlts differ.\n");
 			return 1;	
 		}
-		ast1 = _map_entry(ns_map_uas_fn_post(&ast1->asts), tb_ast, asts);
+		ast1 = _map_entry(ns_map_uad_fn_post(&ast1->asts), tb_ast, asts);
 	}
 
 	return 0;
@@ -290,7 +290,7 @@ uerr tb_wlt_cmp(
  * Return the amount of money in depot of currency @ccy of @wlt.
  * If no such depot exists, return 0.
  */
-tb_amt tb_wlt_get(
+f64 tb_wlt_get(
 	tb_wlt *wlt,
 	tb_ist *ist
 )
@@ -318,12 +318,12 @@ uerr tb_wlt_ord_res_tak(
 
 	/* Read order data. */
 	const u8 typ = ord->typ;
-	const u8 buy = TB_ORD_TYP_IS_BUY(typ)
+	const u8 buy = TB_ORD_TYP_IS_BUY(typ);
 	const f64 req_vol_prm = ord->req_vol_prm;
 	check(req_vol_prm);
 
 	/* Log. */
-	_wlt_log("[%p] res_tak : prm %@ sec %@\n", wlt, sp_ist_dsc(ord->prm), sp_ist_dsc(ord->sec));
+	_wlt_log("[%p] res_tak : prm %@ sec %@\n", wlt, tb_ist_dsc(ord->prm), tb_ist_dsc(ord->sec));
 	_wlt_log("[%p] res_tak : typ %u, buy %u, req_vol_prm %d.\n", wlt, typ, buy, req_vol_prm);
 
 	/*
@@ -331,11 +331,6 @@ uerr tb_wlt_ord_res_tak(
 	 * and remove it.
 	 */
 	if (buy) {
-		assert(
-			(typ == TB_ORD_STK_LIM_BUY) ||
-			(typ == TB_ORD_STK_STP_LIM_BUY),
-			"invalid stock buy typ : %u\n", typ
-		);
 
 		/* Compute the maximal volume. */
 		const f64 req_prc_lim = ord->req_prc_lim;
@@ -370,21 +365,16 @@ uerr tb_wlt_ord_res_rel(
 
 	/* Read order data. */
 	const u8 typ = ord->typ;
-	const u8 buy = TB_ORD_TYP_IS_BUY(typ)
+	const u8 buy = TB_ORD_TYP_IS_BUY(typ);
 	const f64 req_vol_prm = ord->req_vol_prm;
 	check(req_vol_prm);
 
 	/* Log. */
-	_wlt_log("[%p] res_rel : prm %@ sec %@\n", wlt, sp_ist_dsc(ord->prm), sp_ist_dsc(ord->sec));
+	_wlt_log("[%p] res_rel : prm %@ sec %@\n", wlt, tb_ist_dsc(ord->prm), tb_ist_dsc(ord->sec));
 	_wlt_log("[%p] res_rel : typ %u, buy %u, req_vol_prm %d.\n", wlt, typ, buy, req_vol_prm);
 
 	/* If buy, release money in the pop's wallet. */
 	if (buy) {
-		assert(
-			(typ == TB_ORD_STK_LIM_BUY) ||
-			(typ == TB_ORD_STK_STP_LIM_BUY),
-			"invalid stock buy typ : %u\n", typ
-		);
 
 		/* Compute the maximal volume. */
 		const f64 req_prc_lim = ord->req_prc_lim;
@@ -399,7 +389,7 @@ uerr tb_wlt_ord_res_rel(
 
 	/* If sell, add primary back. */
 	else {
-		_stk_add(wlt, ord->sec, req_vol_prm);
+		_ast_add(wlt, ord->sec, req_vol_prm);
 	}
 
 	/* No failure. */
@@ -418,18 +408,15 @@ uerr tb_wlt_ord_res_col(
 {
 	/* Read order data. */
 	const u8 typ = ord->typ;
-	const u8 buy = (typ >= TB_ORD_STK_BUY);
-	const u8 buy = TB_ORD_TYP_IS_BUY(typ)
+	const u8 buy = TB_ORD_TYP_IS_BUY(typ);
 	const f64 req_vol_prm = ord->req_vol_prm;
 	check(req_vol_prm);
 	const f64 rsp_vol_prm = ord->rsp_vol_prm;
 	const f64 rsp_vol_sec = ord->rsp_vol_sec;
 
 	/* Log. */
-	_wlt_log("[%p] res_col : prm %@ sec %@\n", wlt, sp_ist_dsc(ord->prm), sp_ist_dsc(ord->sec));
+	_wlt_log("[%p] res_col : prm %@ sec %@\n", wlt, tb_ist_dsc(ord->prm), tb_ist_dsc(ord->sec));
 	_wlt_log("[%p] res_col : typ %u, buy %u, req_vol_prm %d, rsp_vol_prm %d, rsp_vol_sec %d.\n", wlt, typ, buy, req_vol_prm, rsp_vol_prm, rsp_vol_sec);
-
-	tb_ccy *const ccy = ordd->stk.ccy;
 
 	/* If buy, add primary and update secondary. */
 	if (buy) {
@@ -441,14 +428,14 @@ uerr tb_wlt_ord_res_col(
 		const f64 req_prc_lim = ord->req_prc_lim;
 		_wlt_log("[%p] res_col : req_prc_lim %d\n", wlt, req_prc_lim);
 		const f64 req_vol_sec_lim = req_prc_lim * req_vol_prm;
-		_wlt_log("[%p] res_col : req_vol_sec_lim %d\n", wlt, req_vol_sec_lim));
+		_wlt_log("[%p] res_col : req_vol_sec_lim %d\n", wlt, req_vol_sec_lim);
 		_wlt_log("[%p] res_col : rsp_vol_sec %d\n", wlt, rsp_vol_sec);
 		f64 vol_sec_dif = req_vol_sec_lim - rsp_vol_sec;
 		_wlt_log("[%p] res_col : vol_sec_dif %d\n", wlt, vol_sec_dif);
 
 		/* If less secondary volume used than originally planned, add it. */
-		assert(dif >= 0, "order %@ cost more than expected.\n", tb_ord_dsc(ord, 0));
-		if (dif > 0) _ast_add(wlt, ord->sec, vol_sec_dif);
+		assert(vol_sec_dif >= 0, "order %@ cost more than expected.\n", tb_ord_dsc(ord, 0));
+		if (vol_sec_dif > 0) _ast_add(wlt, ord->sec, vol_sec_dif);
 
 		return 0;
 		
@@ -476,15 +463,11 @@ uerr tb_wlt_ord_res_col(
  ******************/
 
 /*
- * API available only when simulation is enabled.
- */
-
-/*
- * Add @nb money of @ccy to @wlt.
+ * Increase the anount of instances of @ist by @amt.
  */
 void tb_wlt_sim_add(
 	tb_wlt *wlt,
 	tb_ist *ist,
 	f64 amt
-) {return ast_add(wlt, ist, amt);}
+) {return _ast_add(wlt, ist, amt);}
 

@@ -50,7 +50,7 @@ types(
 /*
  * Determine if an order is a buy order or a sell order.
  */
-#define TB_ORD_TYP_IS_BUY(typ) ((typ) >= TB_ORD_STK_BUY)
+#define TB_ORD_TYP_IS_BUY(typ) ((typ) >= TB_ORD_TYP_BUY)
 #define TB_ORD_TYP_IS_SEL(typ) (!TB_ORD_TYP_IS_BUY(typ))
 
 /*
@@ -60,7 +60,7 @@ types(
 	(typ == TB_ORD_TYP_LIM_BUY) || \
 	(typ == TB_ORD_TYP_LIM_SEL) || \
 	(typ == TB_ORD_TYP_STP_LIM_BUY) || \
-	(typ == TB_ORD_TYP_STP_LIM_SEL)
+	(typ == TB_ORD_TYP_STP_LIM_SEL) \
 )
 
 /*
@@ -105,7 +105,7 @@ struct tb_ord {
 	tb_ist *prm;
 
 	/* Secondary. */
-	tb_ccy *sec;
+	tb_ist *sec;
 
 	/* Order type. */
 	u8 typ;
@@ -149,9 +149,10 @@ struct tb_ord {
 /*
  * Construct an order.
  */
-tb_ord tb_ord_ctor(
-	tb_ist *ist,
-	tb_ccy *ccy,
+static inline void tb_ord_ctr(
+	tb_ord *ord,
+	tb_ist *prm,
+	tb_ist *sec,
 	u8 typ,
 	f64 req_vol_prm,
 	f64 req_prc_lim,
@@ -160,8 +161,8 @@ tb_ord tb_ord_ctor(
 	u8 sts
 )
 {
-	ord->ist = ist;
-	ord->ccy = ccy;
+	ord->prm = prm;
+	ord->sec = sec;
 	ord->typ = typ;
 	ord->req_vol_prm = req_vol_prm;
 	ord->req_prc_lim = req_prc_lim;
@@ -213,7 +214,7 @@ uerr tb_ord_val_(
  */
 static inline uerr tb_ord_val(
 	tb_ord *ord
-) {return tb_ord_val(ord, ord->sts);}
+) {return tb_ord_val_(ord, ord->sts);}
 
 /***************
  * Transitions *
@@ -226,8 +227,8 @@ static inline void tb_ord_idl_to_act(
 	tb_ord *ord
 )
 {
-	assert(ord->sts == TB_ORD_TYP_IDL, "expected idle status, got '%u.\n", ord->sts);
-	ord->sts = TB_ORD_TYP_ACT;
+	assert(ord->sts == TB_ORD_STS_IDL, "expected idle status, got '%u.\n", ord->sts);
+	ord->sts = TB_ORD_STS_ACT;
 }
 
 /*
@@ -237,8 +238,8 @@ static inline void tb_ord_idl_to_ccl(
 	tb_ord *ord
 )
 {
-	assert(ord->sts == TB_ORD_TYP_IDL, "expected idle status, got '%u.\n", ord->sts);
-	ord->sts = TB_ORD_TYP_CCL;
+	assert(ord->sts == TB_ORD_STS_IDL, "expected idle status, got '%u.\n", ord->sts);
+	ord->sts = TB_ORD_STS_CCL;
 }
 
 /*
@@ -248,8 +249,8 @@ static inline void tb_ord_idle_to_cpl(
 	tb_ord *ord
 )
 {
-	assert(ord->sts == TB_ORD_TYP_IDL, "expected idle status, got '%u.\n", ord->sts);
-	ord->sts = TB_ORD_TYP_CPL;
+	assert(ord->sts == TB_ORD_STS_IDL, "expected idle status, got '%u.\n", ord->sts);
+	ord->sts = TB_ORD_STS_CPL;
 }
 
 /*
@@ -259,8 +260,8 @@ static inline void tb_ord_act_to_ccl(
 	tb_ord *ord
 )
 {
-	assert(ord->sts == TB_ORD_TYP_ACT, "expected active status, got '%u.\n", ord->sts);
-	ord->sts = TB_ORD_TYP_CCL;
+	assert(ord->sts == TB_ORD_STS_ACT, "expected active status, got '%u.\n", ord->sts);
+	ord->sts = TB_ORD_STS_CCL;
 }
 
 /*
@@ -270,8 +271,8 @@ static inline void tb_ord_act_to_cpl(
 	tb_ord *ord
 )
 {
-	assert(ord->sts == TB_ORD_TYP_ACT, "expected active status, got '%u.\n", ord->sts);
-	ord->sts = TB_ORD_TYP_CPL;
+	assert(ord->sts == TB_ORD_STS_ACT, "expected active status, got '%u.\n", ord->sts);
+	ord->sts = TB_ORD_STS_CPL;
 }
 
 /************
@@ -285,7 +286,7 @@ static inline void tb_ord_rsp_trv(
 	tb_ord *ord
 )
 {
-	ord->rsp_vol_prm = ord->req_vol;
+	ord->rsp_vol_prm = ord->req_vol_prm;
 	ord->rsp_vol_sec = ord->req_prc_stp * ord->rsp_vol_prm;
 }
 

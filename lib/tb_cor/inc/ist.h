@@ -14,7 +14,8 @@
  *********/
 
 types(
-	tb_ist
+	tb_ist,
+	tb_ist_sys
 );
 
 /**************
@@ -53,7 +54,7 @@ struct tb_ist {
 		struct {
 
 			/* Shares instruments of the same system. */
-			map_str shrs;
+			ns_mapn_str shrs;
 
 			/* Marketplace. */
 			tb_mkp *mkp;
@@ -67,7 +68,7 @@ struct tb_ist {
 		struct {
 
 			/* Currency instruments of the same system. */
-			map_str ccys;
+			ns_mapn_str ccys;
 
 			/* Marketplace. */
 			tb_mkp *mkp;
@@ -90,13 +91,13 @@ struct tb_ist {
 struct tb_ist_sys {
 
 	/* Lock. */
-	ns_spn spn;
+	nh_spn lck;
 
 	/* Share instruments. */
-	map_str shrs;
+	ns_map_str shrs;
 
 	/* Currency instruments. */
-	map_str ccys;
+	ns_map_str ccys;
 
 };
 
@@ -128,6 +129,15 @@ tb_ist *tb_ist_ctr_ccy(
 	tb_mkp *mkp,
 	tb_ccy *ccy
 );
+
+/*
+ * Print log data for an instrument.
+ */
+void tb_ist_log(
+	ns_stm *stm,
+	va_list *args
+);
+#define tb_ist_dsc(ist) &tb_ist_log, (ist)
 
 #endif /* TB_IST_H */
 
