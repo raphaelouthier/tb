@@ -44,30 +44,17 @@ struct tb_sgm_syn {
 		u64 u; 
 	} lck;
 
-	/* Maximal number of elements in memory. */
-	volatile u64 elm_nb;
-
 	/* Effective number of elements in memory. */
-	volatile u64 elm_max;
+	volatile u64 elm_nb;
 
 	/* Set <=> someone is writing. */
 	volatile u64 wrt;
 
-	/* Initialized ? */
-	volatile u8 ini;
+	/* Set <=> initialization is reserved. */
+	volatile aad ini_res;
 
-};
-
-/*
- * Array descriptor.
- */
-struct tb_sgm_arr {
-
-	/* Offset. */
-	u64 off;
-
-	/* Element size. */
-	u8 siz;
+	/* Set <=> initialization is done. */
+	volatile aad ini_cpl;
 
 };
 
@@ -78,11 +65,17 @@ struct tb_sgm_arr {
  */
 struct tb_sgm_dsc {
 
+	/* Maximal number of elements in memory. */
+	u64 elm_max;
+
+	/* Data block total size. */
+	uad dat_siz;
+
 	/* Number of arrays. */
 	u8 arr_nb;
 
 	/* Arrays. */
-	tb_sgm_arr arrs[];
+	u8 elm_sizs[];
 
 };
 
@@ -91,20 +84,26 @@ struct tb_sgm_dsc {
  */
 struct tb_sgm {
 
-	/* Resource. */
+	/* Storage resource. */
 	nh_res res;
 
 	/* Storage. */
 	ns_stg *stg;
 
+	/* Metadata. */
+	void *mtd;
+
 	/* Synchronization data. */
-	tb_sgm_stg *stg;
+	tb_sgm_syn *syn;
 
 	/* Descriptor. */
 	tb_sgm_dsc *dsc;
 
 	/* Implementation descriptor. */
 	void *imp;
+
+	/* Data section. */
+	void *dat;
 
 	/* Number of writes performed by the current write request. */
 	u64 wrt_nb;
@@ -125,30 +124,35 @@ struct tb_sgm {
 /* Round up to a page. */
 #define TB_SGM_PAG_RND(x) (((x) + (TB_SGM_PAG_SIZ - 1)) & ~(TB_SGM_PAG_SIZ - 1))
 
+/* Offset of the metadata block. */
+#define TB_SGM_OFF_MTD 0
 
-/* Offset of the synchronization block. */ 
+/* Offset of the synchronization block in the metadata block. */ 
 #define TB_SGM_OFF_SYN 0
 
 /* Size of the synchronization block. */
 #define TB_SGM_SIZ_SYN 1024
 
-/* Offset of the synchronization block. */ 
+/* Offset of the synchronization block in the metadata block. */ 
 #define TB_SGM_OFF_DSC (TB_SGM_OFF_SYN + TB_SGM_SIZ_SYN)
 
 /* Size of the synchronization block. */
 #define TB_SGM_SIZ_DSC 1024
 
-/* Offset of the synchronization block. */ 
+/* Offset of the synchronization block in the metadata block. */ 
 #define TB_SGM_OFF_IMP (TB_SGM_OFF_DSC + TB_SGM_SIZ_DSC)
 
 /* Size of the synchronization block. */
 #define TB_SGM_SIZ_IMP 1024
 
+/* Size of the metadata block. */
+#define TB_SGM_SIZ_MTD (TB_SGM_OFF_IMP + TB_SGM_SIZ_IMP - TB_SGM_OFF_MTD)
+
 /* Offset of the data block. */
-#define TB_SGM_OFF_DAT (TB_SGM_OFF_IMP + TB_SGM_SIZ_IMP)
+#define TB_SGM_OFF_DAT TB_SGM_PAG_RND((TB_SGM_OFF_IMP + TB_SGM_SIZ_IMP))
 
 /* Size of an array block. */
-#define TB_SGM_SIZ_ARR(elm_nbr, elm_siz) TB_SHM_PAG_RND((elm_nbr * elm_siz))
+#define TB_SGM_SIZ_ARR(elm_nbr, elm_siz) TB_SGM_PAG_RND((elm_nbr * elm_siz))
 
 /*****************
  * Lifecycle API *
@@ -157,15 +161,16 @@ struct tb_sgm {
 /*
  * Load a segment.
  * If it does not exist, create it and
- * initialize it with @imp, @arr_nb and @elm_sizs.
- * Otherwise, check that @imp, @arr@nb and @elm_sizs
+ * initialize it with @imp_ini, @arr_nb, @elm_max and @elm_sizs.
+ * Otherwise, check that @imp_ini, @arr_nb, @elm_max and @elm_sizs
  * do match with the loaded content.
  */
 tb_sgm *tb_sgm_opn(
 	const char *pth,
-	void *ini,
-	uad ini_siz,
+	void *imp_ini,
+	uad imp_siz,
 	u8 arr_nb,
+	u64 elm_max,
 	u8 *elm_sizs
 );
 
@@ -190,7 +195,7 @@ static inline u8 tb_sgm_arr_nb(
 /*
  * Return the start of @sgm's @idx-th array.
  */
-static inline void *tb_sgm_arr(
+static inline void *tb_sgm_arr_stt(
 	tb_sgm *sgm,
 	u8 idx
 )
@@ -200,39 +205,25 @@ static inline void *tb_sgm_arr(
 }
 
 /*
- * If @bst has been initialized with data until @mid_end,
+ * If @sgm has been initialized with @elm_nb elements,
  * return 1.
  * Otherwise, return 0.
  */
-u8 sp_bst_rdy(
-	sp_bst *bst,
-	u64 mid_stt,
-	u64 mid_end
+u8 tb_sgm_rdy(
+	tb_sgm *sgm,
+	u64 elm_nb
 );
 
 /*
- * Get read locations for @nb values at @mid.
+ * Get read the @arr_nb read locations for @nb values
+ * starting at @stt into @dst.
  */
-void sp_bst_red_rng(
-	sp_bst *bst,
-	u64 mid,
+void tb_sgm_red_rng(
+	tb_sgm *sgm,
+	u64 stt,
 	u64 nb,
-	sf_sig_f64 *vals,
-	sf_sig_f64 *vols
-);
-
-/*
- * Determine the value of @bst at the highest mid <= @mid.
- * If it exists, store its descriptor at provided locations
- * and return 0.
- * If it doesn't exist, return 1.
- */
-uerr sp_bst_red_val(
-	sp_bst *bst,
-	u64 mid,
-	f64 *valp,
-	f64 *volp,
-	u64 *midp
+	void **dst,
+	u8 arr_nb
 );
 
 /*************
@@ -240,36 +231,35 @@ uerr sp_bst_red_val(
  *************/
 
 /*
- * Attempt to acquire @bst's write privilege. 
- * If so, store its end mid at @midp, and return 0.
+ * Attempt to acquire @sgm's write privilege. 
+ * If so, store its end offset at @offp, and return 0.
  * If someone already has it, return 1.
  */
-uerr sp_bst_wrt_get(
-	sp_bst *bst,
-	u64 *midp
+uerr tb_sgm_wrt_get(
+	tb_sgm *sgm,
+	u64 *offp
 );
 
-
 /*
- * Get the write locations for @nb values of @bst.
- * Return the mid of the first element to write.
+ * Get the @arr_nb write locations for @elm_nb values
+ * of @sgm into @dst.
+ * Return the offset of the first element to write.
  * Write priv must be owned.
  */
-u64 sp_bst_wrt_loc(
-	sp_bst *bst,
-	u64 nb,
-	f64 **valp,
-	f64 **volp
+u64 tb_sgm_wrt_loc(
+	tb_sgm *sgm,
+	u64 elm_nb,
+	void **dst,
+	u8 arr_nb
 );
 
 /*
  * Report @nb elements written.
  * Write priv must be owned.
- * Report the write.
  * Return the next write index.
  */
-u64 sp_bst_wrt_don(
-	sp_bst *bst,
+u64 tb_sgm_wrt_don(
+	tb_sgm *sgm,
 	u64 nb
 );
 
@@ -279,9 +269,8 @@ u64 sp_bst_wrt_don(
  * Releases the write privileges.
  * Return 1 if the segment is complete, 0 otherwise. 
  */
-u8 sp_bst_wrt_cpl(
-	sp_bst *bst
+u8 tb_sgm_wrt_cpl(
+	tb_sgm *sgm
 );
-
 
 #endif /* TB_COR_SGM_H */

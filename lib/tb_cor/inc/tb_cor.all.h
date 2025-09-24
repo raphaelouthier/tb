@@ -14,5 +14,6 @@
 #include <tb_cor/ist.h>
 #include <tb_cor/ord.h>
 #include <tb_cor/wlt.h>
+#include <tb_cor/sgm.h>
 
 #endif /* TB_COR_ALL_H */
