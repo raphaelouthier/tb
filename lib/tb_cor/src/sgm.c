@@ -227,18 +227,19 @@ static inline uerr _ini_chk(
  * do match with the loaded content.
  */
 tb_sgm *tb_sgm_opn(
-	const char *pth,
 	void *imp_ini,
 	uad imp_siz,
 	u8 arr_nb,
 	u64 elm_max,
-	u8 *elm_sizs
+	u8 *elm_sizs,
+	const char *pth,
+	va_list *args
 )
 {
 
 	/* Construct. */
 	tb_sgm *sgm = nh_all(sizeof(tb_sgm) + arr_nb * sizeof(void *));
-	ns_stg *stg = sgm->stg = nh_stg_crt_opn(&sgm->res, pth);
+	ns_stg *stg = sgm->stg = nh_stg_vcrt_opn(&sgm->res, pth, args);
 	assert(stg, "storage %s open failed.\n", pth);
 	sgm->wrt_nb = 0;
 

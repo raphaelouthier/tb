@@ -165,14 +165,31 @@ struct tb_sgm {
  * Otherwise, check that @imp_ini, @arr_nb, @elm_max and @elm_sizs
  * do match with the loaded content.
  */
-tb_sgm *tb_sgm_opn(
-	const char *pth,
+tb_sgm *tb_sgm_vopn(
 	void *imp_ini,
 	uad imp_siz,
 	u8 arr_nb,
 	u64 elm_max,
-	u8 *elm_sizs
+	u8 *elm_sizs,
+	const char *pth,
+	va_list *args
 );
+static inline tb_sgm *tb_sgm_fopn(
+	void *imp_ini,
+	uad imp_siz,
+	u8 arr_nb,
+	u64 elm_max,
+	u8 *elm_sizs,
+	const char *pth,
+	...
+)
+{
+	va_list args;
+	va_start(args, pth);
+	tb_sgm *sgm = tb_sgm_vopn(imp_ini, imp_siz, arr_nb, elm_max, elm_sizs, pth, &args);
+	va_end(args);
+	return sgm;
+}
 
 /*
  * Close and delete @sgm.
@@ -215,7 +232,7 @@ u8 tb_sgm_rdy(
 );
 
 /*
- * Get read the @arr_nb read locations for @nb values
+ * Get the @arr_nb read locations for @nb values
  * starting at @stt into @dst.
  */
 void tb_sgm_red_rng(
