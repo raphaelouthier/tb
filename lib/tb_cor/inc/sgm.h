@@ -170,7 +170,7 @@ tb_sgm *tb_sgm_vopn(
 	uad imp_siz,
 	u8 arr_nb,
 	u64 elm_max,
-	u8 *elm_sizs,
+	const u8 *elm_sizs,
 	const char *pth,
 	va_list *args
 );
@@ -179,7 +179,7 @@ static inline tb_sgm *tb_sgm_fopn(
 	uad imp_siz,
 	u8 arr_nb,
 	u64 elm_max,
-	u8 *elm_sizs,
+	const u8 *elm_sizs,
 	const char *pth,
 	...
 )

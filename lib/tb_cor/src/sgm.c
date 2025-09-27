@@ -98,7 +98,7 @@ static inline void _dsc_ini(
 	u64 elm_max,
 	uad dat_siz,
 	u8 arr_nb,
-	u8 *elm_sizs
+	const u8 *elm_sizs
 )
 {
 	dsc->elm_max = elm_max;
@@ -117,7 +117,7 @@ static inline void _dsc_chk(
 	u64 elm_max,
 	uad dat_siz,
 	u8 arr_nb,
-	u8 *elm_sizs
+	const u8 *elm_sizs
 )
 {
 	assert(dsc->elm_max == elm_max, "dsc mismatch : elm_max : expected %U, got %U.\n", elm_max, dsc->elm_max);
