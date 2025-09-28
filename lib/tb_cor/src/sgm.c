@@ -226,12 +226,12 @@ static inline uerr _ini_chk(
  * Otherwise, check that @imp_ini, @arr_nb, @elm_max and @elm_sizs
  * do match with the loaded content.
  */
-tb_sgm *tb_sgm_opn(
+tb_sgm *tb_sgm_vopn(
 	void *imp_ini,
 	uad imp_siz,
 	u8 arr_nb,
 	u64 elm_max,
-	u8 *elm_sizs,
+	const u8 *elm_sizs,
 	const char *pth,
 	va_list *args
 )

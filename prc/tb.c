@@ -300,7 +300,7 @@ static inline void _tst_sgm(
 	/* Use 255 arrays, ~100K elements,
 	 * 25MiB of random data. */
 	const uad elm_max = 0x1ffff;
-	const uad dat_siz = uad_alu((uad) elm_max * (uad) dat_siz, 6);
+	const uad dat_siz = uad_alu((uad) elm_max * 256, 6);
 	u64 *dat = nh_all(dat_siz);
 	u64 ini = sed;
 	const uad elm_nb = dat_siz / 8;
@@ -360,7 +360,7 @@ static inline void _tst_rpr(
  * Muxers *
  **********/
 
-#define tst(nam) ({tst_cnt++; _tst_##nam(sys, sed);})
+#define tst(nam, ...) ({tst_cnt++; _tst_##nam(sys, sed, ##__VA_ARGS__); nh_tst_run(sys, thr_nb);})
 
 /*
  * Run one test.
@@ -382,8 +382,8 @@ static u32 _mux_one(
 	u32 tst_cnt = 0;
 	nh_tst_sys *sys = nh_tst_sys_ctr();
 	if (rpr__flg) tst(rpr); 
-	if (sgm__flg) tst(sgm); 
-	nh_tst_run(sys, thr_nb);
+	if (sgm__flg) tst(sgm, thr_nb); 
+	assert(nh_tst_don(sys));
 	debug("tb tests : %u testbenches ran, %U sequences, %U unit tests, %U errors.\n", tst_cnt, sys->seq_cnt, sys->unt_cnt, sys->err_cnt);
 	u32 ret = sys->err_cnt != 0;
 	nh_tst_sys_dtr(sys);
@@ -403,8 +403,8 @@ static u32 _mux_all(
 	u32 tst_cnt = 0;
 	nh_tst_sys *sys = nh_tst_sys_ctr();
 	tst(rpr);
-	tst(sgm);
-	nh_tst_run(sys, thr_nb);
+	tst(sgm, thr_nb);
+	assert(nh_tst_don(sys));
 	debug("tb tests : %u testbenches ran, %U sequences, %U unit tests, %U errors.\n", tst_cnt, sys->seq_cnt, sys->unt_cnt, sys->err_cnt);
 	u32 ret = sys->err_cnt != 0;
 	nh_tst_sys_dtr(sys);
