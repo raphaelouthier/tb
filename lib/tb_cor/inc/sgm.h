@@ -37,24 +37,22 @@ types(
  */
 struct tb_sgm_syn {
 
-	/* Lock area. */
-	union {
-		uad a; 
-		aad v; 
-		u64 u; 
-	} lck;
-
-	/* Effective number of elements in memory. */
-	volatile u64 elm_nb;
-
-	/* Set <=> someone is writing. */
-	volatile u64 wrt;
 
 	/* Set <=> initialization is reserved. */
 	volatile aad ini_res;
 
 	/* Set <=> initialization is done. */
 	volatile aad ini_cpl;
+
+	/* Set <=> someone is writing. */
+	volatile aad wrt;
+
+	/*
+	 * Effective number of elements in memory.
+	 * Readable by anyome, writeable only by the holder
+	 * of @wrt.
+	 */
+	volatile aad elm_nb;
 
 };
 
@@ -66,7 +64,7 @@ struct tb_sgm_syn {
 struct tb_sgm_dsc {
 
 	/* Maximal number of elements in memory. */
-	u64 elm_max;
+	uad elm_max;
 
 	/* Data block total size. */
 	uad dat_siz;
@@ -104,9 +102,6 @@ struct tb_sgm {
 
 	/* Data section. */
 	void *dat;
-
-	/* Number of writes performed by the current write request. */
-	u64 wrt_nb;
 
 	/* Array VAs. */
 	void *arrs[];
@@ -169,7 +164,7 @@ tb_sgm *tb_sgm_vopn(
 	void *imp_ini,
 	uad imp_siz,
 	u8 arr_nb,
-	u64 elm_max,
+	uad elm_max,
 	const u8 *elm_sizs,
 	const char *pth,
 	va_list *args
@@ -178,7 +173,7 @@ static inline tb_sgm *tb_sgm_fopn(
 	void *imp_ini,
 	uad imp_siz,
 	u8 arr_nb,
-	u64 elm_max,
+	uad elm_max,
 	const u8 *elm_sizs,
 	const char *pth,
 	...
@@ -228,7 +223,7 @@ static inline void *tb_sgm_arr_stt(
  */
 u8 tb_sgm_rdy(
 	tb_sgm *sgm,
-	u64 elm_nb
+	uad elm_nb
 );
 
 /*
@@ -237,8 +232,8 @@ u8 tb_sgm_rdy(
  */
 void tb_sgm_red_rng(
 	tb_sgm *sgm,
-	u64 stt,
-	u64 nb,
+	uad stt,
+	uad nb,
 	void **dst,
 	u8 arr_nb
 );
@@ -254,7 +249,7 @@ void tb_sgm_red_rng(
  */
 uerr tb_sgm_wrt_get(
 	tb_sgm *sgm,
-	u64 *offp
+	uad *offp
 );
 
 /*
@@ -263,9 +258,9 @@ uerr tb_sgm_wrt_get(
  * Return the offset of the first element to write.
  * Write priv must be owned.
  */
-u64 tb_sgm_wrt_loc(
+uad tb_sgm_wrt_loc(
 	tb_sgm *sgm,
-	u64 elm_nb,
+	uad elm_nb,
 	void **dst,
 	u8 arr_nb
 );
@@ -275,9 +270,9 @@ u64 tb_sgm_wrt_loc(
  * Write priv must be owned.
  * Return the next write index.
  */
-u64 tb_sgm_wrt_don(
+uad tb_sgm_wrt_don(
 	tb_sgm *sgm,
-	u64 nb
+	uad wrt_nb
 );
 
 /*

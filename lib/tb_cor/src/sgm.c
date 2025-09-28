@@ -2,37 +2,9 @@
 
 #include <tb_cor/tb_cor.all.h>
 
-/***********
- * Locking *
- ***********/
-
-/*
- * Lock @syn.
- * Basic spinlock implementation.
- */
-static inline void _syn_lck(
-	tb_sgm_syn *syn
-)
-{
-	while (1) {
-		aad red = 0;
-		u8 don = __atomic_compare_exchange_n(&syn->lck.v, &red, 1, 0, __ATOMIC_ACQUIRE, __ATOMIC_ACQUIRE);
-		if (don) break;
-		WAIT_EVENT();
-	}
-}
-
-/*
- * Unlock @syn.
- */
-static inline void _syn_ulk(
-	tb_sgm_syn *syn
-)
-{
-	assert(NS_RED_ONC(syn->lck.v) == 1);
-	__atomic_store_n(&syn->lck.v, 0, __ATOMIC_RELEASE);
-	SEND_EVENT();
-}
+/* Barriers. */
+#define ns_bar_any_any()
+#define ns_bar_str_str()
 
 /*******
  * API *
@@ -49,24 +21,21 @@ static inline u8 _syn_ini(
 
 	/* Read the @ini_res, do the initialization if it is 0,
 	 * report init reserved in all cases. */ 
-	const u8 do_ini = !aad_xchg(&syn->ini_res, 1);
+	const u8 do_ini = !aad_xch(&syn->ini_res, 1);
 
 	/* If initialization reserved by someone else,
 	 * wait for completion, then ensure visibility. */
 	if (!do_ini) {
 		while (!aad_red(&syn->ini_cpl));
-		_syn_lck(syn);
-		_syn_ulk(syn);
 		return 0;
 	}
 
 	/* If we must do the initialization, lock, 
 	 * initialize @syn, and report that initialization
 	 * must be done. */
-	syn->lck.u = 0;
-	_syn_lck(syn);
+	aad_wrt(&syn->wrt, 1);
+	ns_bar_str_str();
 	syn->elm_nb = 0;
-	syn->wrt = 0;
 	return 1;
 	
 }
@@ -83,7 +52,9 @@ static inline void _sgm_ini_cpl(
 	ns_stg_syn(sgm->stg, sgm->mtd, TB_SGM_SIZ_MTD); 
 
 	/* Unlock. */
-	_syn_ulk(sgm->syn);
+	const uad prv = aad_xch(&sgm->syn->wrt, 0);
+	assert(prv == 1);
+	ns_bar_any_any();
 
 	/* Report init done, unblock others. */
 	aad_wrt(&sgm->syn->ini_cpl, 1);
@@ -161,64 +132,6 @@ static inline void _imp_chk(
 	}
 }
 
-#if 0
-/*
- * Initialize the metadata section if required.
- */
-static inline uerr _ini_chk(
-	tb_sgm *sgm,
-	const char *mkp,
-	const char *sym,
-	u32 yer,
-	const char **rsn
-)
-{
-	tb_sgm_syn *syn = sgm->syn;
-
-	/* Compute year-based constants. */
-	const u64 mid_stt = sp_mid(yer, 0, 0, 0, 0);
-	const u64 mid_max = (ns_is_leap_year(yer) ? 366 : 365) * 24 * 60;
-
-	/* Lock the metadata. */
-	uerr err = 0;
-	_syn_lck(syn);
-
-	/* If initialized, verify. */
-	const u8 ini = syn->ini;
-	if (syn->ini) {
-		#define H(c, v) ({if (c) {err = 1; *rsn = v; goto end;}})
-		H((ns_str_cmp(mkp, (const char *) syn->mkp) != 0), "mkp"); 
-		H((ns_str_cmp(sym, (const char *) syn->sym) != 0), "sym");
-		H((syn->yer != yer), "year");
-		H((mid_stt != syn->mid_stt), "mid_stt");
-		H((mid_max != syn->mid_max), "mid_max");
-	}
-	
-	/* If not initialzied, init. */
-	else {
-		NS_WRT_ONC(syn->mid_max, mid_max);
-		NS_WRT_ONC(syn->mid_nb, 0);
-		NS_WRT_ONC(syn->wrt, 0);
-		NS_WRT_ONC(syn->ini, 1);
-		sp_str_cpy((char *) syn->mkp, mkp);
-		sp_str_cpy((char *) syn->sym, sym);
-		NS_WRT_ONC(syn->mid_stt, mid_stt);
-		NS_WRT_ONC(syn->yer, yer);
-	}
-
-	/* Unlock. */
-	_syn_ulk(syn);
-
-	/* Synchronize metadata. */
-	if (!ini) ns_stg_syn(sgm->stg, sgm->syn, tb_sgm_BLK_SIZ_syn); 
-
-	/* Complete. */
-	end:
-	return err;
-}
-
-#endif
-	
 /*
  * Load a segment.
  * If it does not exist, create it and
@@ -241,7 +154,6 @@ tb_sgm *tb_sgm_vopn(
 	tb_sgm *sgm = nh_all(sizeof(tb_sgm) + arr_nb * sizeof(void *));
 	ns_stg *stg = sgm->stg = nh_stg_vcrt_opn(&sgm->res, pth, args);
 	assert(stg, "storage %s open failed.\n", pth);
-	sgm->wrt_nb = 0;
 
 	/* Compute the size. */
 	uad dat_siz = 0;
@@ -275,6 +187,7 @@ tb_sgm *tb_sgm_vopn(
 	if (do_ini) {
 		_dsc_ini(dsc, elm_max, dat_siz, arr_nb, elm_sizs);
 		_imp_ini(sgm, imp_ini, imp_siz);
+		_sgm_ini_cpl(sgm);
 	}
 
 	/* Verify. */
@@ -287,7 +200,7 @@ tb_sgm *tb_sgm_vopn(
 
 	/* Assign arrays. */
 	void *arr_stt = dat;
-	uad _dat_siz;
+	uad _dat_siz = 0;
 	for (u8 arr_idx = 0; arr_idx < arr_nb; arr_idx++) {
 		sgm->arrs[arr_idx] = arr_stt;
 		const uad siz = TB_SGM_SIZ_ARR(elm_max, elm_sizs[arr_idx]);
@@ -339,14 +252,11 @@ void tb_sgm_dtr(
  */
 u8 tb_sgm_rdy(
 	tb_sgm *sgm,
-	u64 elm_nb
+	uad elm_nb
 )
 {
-	tb_sgm_syn *syn = sgm->syn;
-	_syn_lck(syn);
-	const u64 sgm_elm_nb = NS_RED_ONC(sgm->syn->elm_nb);
+	const uad sgm_elm_nb = NS_RED_ONC(sgm->syn->elm_nb);
 	assert(sgm_elm_nb <= sgm->dsc->elm_max);
-	_syn_ulk(syn);
 	return (elm_nb <= sgm_elm_nb);
 }
 
@@ -387,16 +297,21 @@ uerr tb_sgm_wrt_get(
 	u64 *offp
 )
 {
+
+	/* Require lock priv. */
 	tb_sgm_syn *syn = sgm->syn;
-	_syn_lck(syn);
-	uerr err = (NS_RED_ONC(syn->wrt) != 0);
-	if (err) goto end;
-	NS_WRT_ONC(syn->wrt, 1);
+	const aad prv = aad_xch(&syn->wrt, 1);
+
+	/* If someone already has it, fail. */
+	if (prv) return 1;
+
+	/* If we got it, initialize the write procedure. */
+	ns_bar_any_any();
 	*offp = syn->elm_nb;
-	sgm->wrt_nb = 0;
-	end:;
-	_syn_ulk(syn);
-	return err;
+
+	/* Report success. */
+	return 0;
+
 }
 
 /*
@@ -405,19 +320,19 @@ uerr tb_sgm_wrt_get(
  * Return the offset of the first element to write.
  * Write priv must be owned.
  */
-u64 tb_sgm_wrt_loc(
+uad tb_sgm_wrt_loc(
 	tb_sgm *sgm,
-	u64 wrt_nb,
+	uad wrt_nb,
 	void **dst,
 	u8 arr_nb
 )
 {
 	check(arr_nb == sgm->dsc->arr_nb);
-	check(wrt_nb < (u64) (u32) -1);
+	check(wrt_nb < (uad) (u32) -1);
 	tb_sgm_syn *syn = sgm->syn;
 	check(NS_RED_ONC(syn->wrt));
-	const u64 wrt_stt = NS_RED_ONC(syn->elm_nb);
-	const u64 wrt_end = wrt_stt + wrt_nb;
+	const uad wrt_stt = NS_RED_ONC(syn->elm_nb);
+	const uad wrt_end = wrt_stt + wrt_nb;
 	check(wrt_end <= sgm->dsc->elm_max);
 	for (u8 arr_id = 0; arr_id < arr_nb; arr_id++) {
 		dst[arr_id] = ns_psum(sgm->arrs[arr_id], wrt_stt * sgm->dsc->elm_sizs[arr_id]);  
@@ -431,15 +346,15 @@ u64 tb_sgm_wrt_loc(
  * Report the write.
  * Return the next write index.
  */
-u64 tb_sgm_wrt_don(
+uad tb_sgm_wrt_don(
 	tb_sgm *sgm,
-	u64 wrt_nb
+	uad wrt_nb
 )
 {
-	check(wrt_nb < (u64) (u32) -1);
-	sgm->wrt_nb += (u64) wrt_nb;
-	check(sgm->wrt_nb < sgm->dsc->elm_max);
-	return NS_RED_ONC(sgm->syn->elm_nb) + sgm->wrt_nb;
+	const uad elm_nb = aad_add_red(&sgm->syn->elm_nb, wrt_nb);
+	assert(wrt_nb <= elm_nb);
+	assert(elm_nb <= sgm->dsc->elm_max);
+	return elm_nb;
 }
 
 /*
@@ -452,22 +367,17 @@ u8 tb_sgm_wrt_cpl(
 	tb_sgm *sgm
 )
 {
-	/* Verify write data, prepare the write. */
+	/* Verify write data, determine fullness. */
 	tb_sgm_syn *syn = sgm->syn;
-	const u64 wrt_nb = NS_RED_ONC(sgm->wrt_nb);
-	const u64 wrt_stt = syn->elm_nb;
-	const u64 wrt_end = wrt_stt + wrt_nb;
-	check(wrt_end <= wrt_stt);
-	const u64 elm_max = sgm->dsc->elm_max;
-	check(wrt_end <= elm_max);
-	const u8 ful = (wrt_end == elm_max);
+	const uad elm_nb = syn->elm_nb;
+	const uad elm_max = sgm->dsc->elm_max;
+	assert(elm_nb <= elm_max);
+	const u8 ful = (elm_nb == elm_max);
 
 	/* Update nb and clear write. */
-	_syn_lck(syn);
-	check(NS_RED_ONC(syn->wrt));
-	NS_WRT_ONC(syn->wrt, 0);
-	NS_WRT_ONC(syn->elm_nb, wrt_end);
-	_syn_ulk(syn);
+	ns_bar_any_any();
+	const uad prv = aad_xch(&syn->wrt, 0);
+	assert(prv == 1);
 
 	/* Return the fullness. */
 	return ful;

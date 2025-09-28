@@ -1,2 +1,6 @@
 TODO storage testbench
 
+TODO actually define ns_bar_..._... to something
+
+TODO understand consistency model of C and implement my own.
+

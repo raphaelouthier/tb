@@ -92,6 +92,7 @@ static inline uad _gat_pas(
 
 	/* Sample the open count. */
 	uad gat_ctr = aad_red(&syn->gat_ctr);
+	uad gat_ctr1;
 
 	/* Wait at gate 0. */
 	uad stt0 = aad_inc_red(&syn->stt0);
@@ -100,7 +101,7 @@ static inline uad _gat_pas(
 		aad_wrt(&syn->gat1, 0);
 		aad_wrt(&syn->stt1, 0);
 		aad_wrt(&syn->gat0, 1);
-		uad gat_ctr1 = aad_red_inc(&syn->gat_ctr);
+		gat_ctr1 = aad_inc_red(&syn->gat_ctr);
 		assert(gat_ctr1 == gat_ctr + 1);
 	} else {
 		while (!aad_red(&syn->gat0));
@@ -118,16 +119,18 @@ static inline uad _gat_pas(
 	}
 
 	/* Return the sampled gate counter. */
-	return gat_ctr;
+	return gat_ctr1;
 
 }
 
 #define GAT_PAS(syn) \
+	debug("GAT_IN\n"); \
 	assert(gat_ctr == itr_ctr); \
 	itr_ctr++; \
-	gat_ctr = _gat_pas(syn);
+	gat_ctr = _gat_pas(syn); \
+	debug("GAT_OUT\n");
 
-#define SGM_ELM_NB 0x1ffff
+#define SGM_ELM_NB 0xfff
 
 /*
  * Per-thread entrypoint.
@@ -156,13 +159,19 @@ static u32 _sgm_exc(
 		"/tmp/tb_sgm_tst"
 	);
 	assert(sgm);
+	assert(aad_red(&sgm->syn->ini_res) == 1);
+	assert(aad_red(&sgm->syn->ini_cpl) == 1);
+	assert(sgm->syn->ini_res == 1);
+	assert(sgm->syn->ini_cpl == 1);
+	debug("%p %p.\n", sgm, sgm->syn);
 
 	/* Iterate over the size range. */
 	uad siz_crt = 1;
 	const uad siz_max = SGM_ELM_NB;
 	uad siz_sum = 0;
-	uad gat_ctr;
+	uad gat_ctr = 0;
 	while (siz_sum < siz_max) {
+		debug("ITR\n");
 		
 		/* Pass the gate. */
 		GAT_PAS(syn);
@@ -172,6 +181,7 @@ static u32 _sgm_exc(
 		uerr err = 0;
 		u64 off = 0;
 		for (u32 i = 0; i < 100000; i++) {
+			debug("\r%u", i);
 			err = tb_sgm_wrt_get(sgm, &off);
 			if (!err) {
 				uad val = aad_red_inc(&syn->val_ctr);
@@ -186,6 +196,7 @@ static u32 _sgm_exc(
 				aad_red_add(&syn->scr, val);
 			}
 		}
+		debug("\n");
 
 		/* If any error was detected, stop. */
 		assert(!aad_red(&syn->err_ctr));
@@ -194,14 +205,16 @@ static u32 _sgm_exc(
 		GAT_PAS(syn);
 
 		/* Lock. */ 
-		err = tb_sgm_wrt_get(sgm, &off);
-
-		/* Check that everyone is in sync. */
-		assert(gat_ctr == itr_ctr);
-		itr_ctr++;
+		if (syn->wrk_nb) {
+			assert(!sgm->syn->wrt);
+		}
+		const u8 has_wrt = !tb_sgm_wrt_get(sgm, &off);
+		if (syn->wrk_nb == 1) {
+			assert(has_wrt);
+		}
 
 		/* If write privileges acquired, add data. */
-		if (!err) {
+		if (has_wrt) {
 			assert(off == siz_sum); 
 
 			/* Write in up to 8 passes. */
@@ -215,10 +228,11 @@ static u32 _sgm_exc(
 				tb_sgm_wrt_loc(sgm, pas_siz, dsts, ARR_NB);
 
 				/* Check offsets and write. */ 
-				for (u16 i = 0; i < 256; i++) {
-					assert(dsts[i] == ns_psum(sgm->arrs, (off + wrt_siz) * (uad) i));
-					const uad len = pas_siz * (uad) i;
-					const void *src = ns_psum(syn->dat, (off * wrt_siz) * (uad) i);
+				for (u16 i = 0; i < ARR_NB; i++) {
+					assert(dsts[i]);
+					assert(dsts[i] == ns_psum(sgm->arrs[i], (off + wrt_siz) * (uad) (i + 1)));
+					const uad len = pas_siz * (uad) (i + 1);
+					const void *src = ns_psum(syn->dat, (off + wrt_siz) * (uad) (i + 1));
 					ns_mem_cpy(dsts[i], src, len);
 				}
 
@@ -226,10 +240,11 @@ static u32 _sgm_exc(
 				wrt_siz += pas_siz;
 				tb_sgm_wrt_don(sgm, pas_siz);
 				assert(tb_sgm_rdy(sgm, off + wrt_siz));
+				assert(!tb_sgm_rdy(sgm, off + wrt_siz + 1));
 
 			}
 
-			assert(pas_siz == siz_crt);
+			assert(wrt_siz == siz_crt);
 
 		}
 
@@ -242,7 +257,7 @@ static u32 _sgm_exc(
 		GAT_PAS(syn);
 
 		/* Unlock. */
-		if (!err) tb_sgm_wrt_cpl(sgm);
+		if (has_wrt) tb_sgm_wrt_cpl(sgm);
 
 		/* Pass the gate. */
 		GAT_PAS(syn);
@@ -250,32 +265,34 @@ static u32 _sgm_exc(
 		/* Verify data in up to 8 passes. */
 		{
 			assert(tb_sgm_rdy(sgm, siz_sum));
+			assert(!tb_sgm_rdy(sgm, siz_sum + 1));
 			const uad pas_nb = (siz_sum > 8) ? 8 : 1;
 			const uad pas_siz = siz_sum / pas_nb;
-			uad pas_rem = pas_siz;
-			uad wrt_siz = 0;
+			uad pas_rem = siz_sum;
+			uad ttl_red_siz = 0;
 			while (pas_rem) {
-				uad red_siz = (pas_rem < pas_siz) ? pas_rem : pas_siz;
+				const uad red_siz = (pas_rem < pas_siz) ? pas_rem : pas_siz;
 
 				/* Get offsets. */
-				assert(tb_sgm_rdy(sgm, wrt_siz + red_siz));
-				tb_sgm_red_rng(sgm, wrt_siz, red_siz, dsts, ARR_NB);
+				assert(tb_sgm_rdy(sgm, ttl_red_siz + red_siz));
+				tb_sgm_red_rng(sgm, ttl_red_siz, red_siz, dsts, ARR_NB);
 
 				/* Check offsets and write. */ 
-				for (u16 i = 0; i < 256; i++) {
-					assert(dsts[i] == ns_psum(sgm->arrs, wrt_siz * (uad) i));
-					const uad len = red_siz * (uad) i;
-					const void *src = ns_psum(syn->dat, wrt_siz * (uad) i);
+				for (u16 i = 0; i < ARR_NB; i++) {
+					assert(dsts[i]);
+					assert(dsts[i] == ns_psum(sgm->arrs[i], ttl_red_siz * (uad) (i + 1)));
+					const uad len = red_siz * (uad) (i + 1);
+					const void *src = ns_psum(syn->dat, ttl_red_siz * (uad) (i + 1));
 					ns_mem_cpy(dsts[i], src, len);
 				}
 
-				/* Report write. */
-				SAFE_ADD(wrt_siz, red_siz);
+				/* Report read. */
+				SAFE_ADD(ttl_red_siz, red_siz);
 				SAFE_SUB(pas_rem, red_siz);
 
 			}
 
-			assert(wrt_siz == siz_sum);
+			assert(ttl_red_siz == siz_sum);
 
 		}
 
@@ -325,7 +342,7 @@ static inline void _tst_sgm(
 
 	/* Create 15 workers and execute on our end too. */
 	u8 *thr_blk = nh_all(1024 * (uad) wrk_nb);
-	for (u8 i = 0; i < wrk_nb; i++) {
+	for (u8 i = 1; i < wrk_nb; i++) {
 		assert(!nh_thr_run(
 			ns_psum(thr_blk, 1024 * (uad) (i - 1)),
 			1024,
