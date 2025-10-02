@@ -13,6 +13,9 @@ typedef struct {
 	/* Random data. */
 	u64 *dat;
 
+	/* Storage path. */
+	const char *pth;
+
 	/* Number of workers. */
 	u8 wrk_nb;
 
@@ -31,8 +34,8 @@ typedef struct {
 	/* Gate pass counter. */
 	volatile aad gat_ctr;
 
-	/* Scratch. */
-	volatile aad scr;
+	/* Write perm acquisistion failure counter. */
+	volatile aad fal_ctr;
 
 	/* Counter. */
 	volatile aad val_ctr;
@@ -92,7 +95,6 @@ static inline uad _gat_pas(
 
 	/* Sample the open count. */
 	uad gat_ctr = aad_red(&syn->gat_ctr);
-	uad gat_ctr1;
 
 	/* Wait at gate 0. */
 	uad stt0 = aad_inc_red(&syn->stt0);
@@ -101,7 +103,7 @@ static inline uad _gat_pas(
 		aad_wrt(&syn->gat1, 0);
 		aad_wrt(&syn->stt1, 0);
 		aad_wrt(&syn->gat0, 1);
-		gat_ctr1 = aad_inc_red(&syn->gat_ctr);
+		uad gat_ctr1 = aad_inc_red(&syn->gat_ctr);
 		assert(gat_ctr1 == gat_ctr + 1);
 	} else {
 		while (!aad_red(&syn->gat0));
@@ -119,18 +121,19 @@ static inline uad _gat_pas(
 	}
 
 	/* Return the sampled gate counter. */
-	return gat_ctr1;
+	return gat_ctr + 1;
 
 }
 
 #define GAT_PAS(syn) \
-	debug("GAT_IN\n"); \
-	assert(gat_ctr == itr_ctr); \
+	/*debug("GAT_IN\n"); */ \
+	assert(gat_ctr == itr_ctr, "SUUS0\n"); \
 	itr_ctr++; \
 	gat_ctr = _gat_pas(syn); \
-	debug("GAT_OUT\n");
+	assert(gat_ctr == itr_ctr, "SUUS1\n"); \
+	/*debug("GAT_OUT\n")*/;
 
-#define SGM_ELM_NB 0xfff
+#define SGM_ELM_NB 0x1ffff
 
 /*
  * Per-thread entrypoint.
@@ -156,14 +159,14 @@ static u32 _sgm_exc(
 		ARR_NB,
 		SGM_ELM_NB,
 		elm_sizs,
-		"/tmp/tb_sgm_tst"
+		syn->pth
 	);
 	assert(sgm);
 	assert(aad_red(&sgm->syn->ini_res) == 1);
 	assert(aad_red(&sgm->syn->ini_cpl) == 1);
 	assert(sgm->syn->ini_res == 1);
 	assert(sgm->syn->ini_cpl == 1);
-	debug("%p %p.\n", sgm, sgm->syn);
+	//debug("%p %p.\n", sgm, sgm->syn);
 
 	/* Iterate over the size range. */
 	uad siz_crt = 1;
@@ -171,7 +174,10 @@ static u32 _sgm_exc(
 	uad siz_sum = 0;
 	uad gat_ctr = 0;
 	while (siz_sum < siz_max) {
-		debug("ITR\n");
+		debug("ITR %p\n", siz_crt);
+
+		/* Reset the write failure counter. */
+		aad_wrt(&syn->fal_ctr, 0);
 		
 		/* Pass the gate. */
 		GAT_PAS(syn);
@@ -181,22 +187,24 @@ static u32 _sgm_exc(
 		uerr err = 0;
 		u64 off = 0;
 		for (u32 i = 0; i < 100000; i++) {
-			debug("\r%u", i);
+			//debug("\r%u", i);
 			err = tb_sgm_wrt_get(sgm, &off);
 			if (!err) {
 				uad val = aad_red_inc(&syn->val_ctr);
 				aad_red_add(&syn->err_ctr, val);
+				assert(!val);
 				val = aad_dec_red(&syn->val_ctr);
+				assert(!val);
 				aad_red_add(&syn->err_ctr, val);
 				tb_sgm_wrt_cpl(sgm);
 			} else {
 				uad val = aad_red(&syn->val_ctr);
-				aad_red_add(&syn->scr, val);
-				val = aad_dec_red(&syn->val_ctr);
-				aad_red_add(&syn->scr, val);
+				aad_red_add(&syn->fal_ctr, val);
+				val = aad_red(&syn->val_ctr);
+				aad_red_add(&syn->fal_ctr, val);
 			}
 		}
-		debug("\n");
+		//debug("\n");
 
 		/* If any error was detected, stop. */
 		assert(!aad_red(&syn->err_ctr));
@@ -204,8 +212,15 @@ static u32 _sgm_exc(
 		/* Pass the gate. */
 		GAT_PAS(syn);
 
+		/* If no collision, report it. */
+		if (syn->wrk_nb != 1) {
+			if (!syn->fal_ctr) {
+				debug("NO COLLISION.\n");
+			}
+		}
+
 		/* Lock. */ 
-		if (syn->wrk_nb) {
+		if (syn->wrk_nb == 1) {
 			assert(!sgm->syn->wrt);
 		}
 		const u8 has_wrt = !tb_sgm_wrt_get(sgm, &off);
@@ -283,7 +298,7 @@ static u32 _sgm_exc(
 					assert(dsts[i] == ns_psum(sgm->arrs[i], ttl_red_siz * (uad) (i + 1)));
 					const uad len = red_siz * (uad) (i + 1);
 					const void *src = ns_psum(syn->dat, ttl_red_siz * (uad) (i + 1));
-					ns_mem_cpy(dsts[i], src, len);
+					assert(!ns_mem_cmp(dsts[i], src, len));
 				}
 
 				/* Report read. */
@@ -296,6 +311,9 @@ static u32 _sgm_exc(
 
 		}
 
+		/* Pass the gate. */
+		GAT_PAS(syn);
+
 	}
 	assert(siz_sum == siz_max);
 	return 0;
@@ -307,12 +325,13 @@ static u32 _sgm_exc(
 static inline void _tst_sgm(
 	nh_tst_sys *sys,
 	u64 sed,
-	u8 wrk_nb
+	u8 wrk_nb,
+	const char *stg_pth
 )
 {
 
 	/* Clean if needed. */
-	nh_fs_del_stg("/tmp/tb_sgm_tst");
+	nh_fs_del_stg(stg_pth);
 
 	/* Use 255 arrays, ~100K elements,
 	 * 25MiB of random data. */
@@ -330,13 +349,14 @@ static inline void _tst_sgm(
 	nh_all__(tb_tst_syn, syn);
 	syn->sed = sed;
 	syn->dat = dat;
+	syn->pth = stg_pth;
 	syn->wrk_nb = wrk_nb;
 	aad_wrt(&syn->gat0, 0);
 	aad_wrt(&syn->stt0, 0);
 	aad_wrt(&syn->gat1, 0);
 	aad_wrt(&syn->stt1, 0);
 	aad_wrt(&syn->gat_ctr, 0);
-	aad_wrt(&syn->scr, 0);
+	aad_wrt(&syn->fal_ctr, 0);
 	aad_wrt(&syn->val_ctr, 0);
 	aad_wrt(&syn->err_ctr, 0);
 
@@ -359,6 +379,9 @@ static inline void _tst_sgm(
 	/* Free the data block. */
 	nh_fre(dat, dat_siz);
 
+	/* Clean. */
+	nh_fs_del_stg(stg_pth);
+
 }
 
 /**********************
@@ -378,6 +401,9 @@ static inline void _tst_rpr(
  **********/
 
 #define tst(nam, ...) ({tst_cnt++; _tst_##nam(sys, sed, ##__VA_ARGS__); nh_tst_run(sys, thr_nb);})
+
+//#define SGM_PTH "/tmp/tb_sgm_tst"
+#define SGM_PTH "/home/bt/tb_sgm_tst"
 
 /*
  * Run one test.
@@ -399,7 +425,7 @@ static u32 _mux_one(
 	u32 tst_cnt = 0;
 	nh_tst_sys *sys = nh_tst_sys_ctr();
 	if (rpr__flg) tst(rpr); 
-	if (sgm__flg) tst(sgm, thr_nb); 
+	if (sgm__flg) tst(sgm, thr_nb, SGM_PTH); 
 	assert(nh_tst_don(sys));
 	debug("tb tests : %u testbenches ran, %U sequences, %U unit tests, %U errors.\n", tst_cnt, sys->seq_cnt, sys->unt_cnt, sys->err_cnt);
 	u32 ret = sys->err_cnt != 0;
@@ -420,7 +446,7 @@ static u32 _mux_all(
 	u32 tst_cnt = 0;
 	nh_tst_sys *sys = nh_tst_sys_ctr();
 	tst(rpr);
-	tst(sgm, thr_nb);
+	tst(sgm, thr_nb, SGM_PTH);
 	assert(nh_tst_don(sys));
 	debug("tb tests : %u testbenches ran, %U sequences, %U unit tests, %U errors.\n", tst_cnt, sys->seq_cnt, sys->unt_cnt, sys->err_cnt);
 	u32 ret = sys->err_cnt != 0;

@@ -2,10 +2,6 @@
 
 #include <tb_cor/tb_cor.all.h>
 
-/* Barriers. */
-#define ns_bar_any_any()
-#define ns_bar_str_str()
-
 /*******
  * API *
  *******/
@@ -21,20 +17,19 @@ static inline u8 _syn_ini(
 
 	/* Read the @ini_res, do the initialization if it is 0,
 	 * report init reserved in all cases. */ 
-	const u8 do_ini = !aad_xch(&syn->ini_res, 1);
+	const u8 do_ini = !ns_atm(aad, xch, aar, &syn->ini_res, 1);
 
 	/* If initialization reserved by someone else,
 	 * wait for completion, then ensure visibility. */
 	if (!do_ini) {
-		while (!aad_red(&syn->ini_cpl));
+		while (!ns_atm(aad, red, acq, &syn->ini_cpl));
 		return 0;
 	}
 
 	/* If we must do the initialization, lock, 
 	 * initialize @syn, and report that initialization
 	 * must be done. */
-	aad_wrt(&syn->wrt, 1);
-	ns_bar_str_str();
+	ns_atm(aad, wrt, rel, &syn->wrt, 1);
 	syn->elm_nb = 0;
 	return 1;
 	
@@ -52,12 +47,11 @@ static inline void _sgm_ini_cpl(
 	ns_stg_syn(sgm->stg, sgm->mtd, TB_SGM_SIZ_MTD); 
 
 	/* Unlock. */
-	const uad prv = aad_xch(&sgm->syn->wrt, 0);
+	const uad prv = ns_atm(aad, xch, aar, &sgm->syn->wrt, 0);
 	assert(prv == 1);
-	ns_bar_any_any();
 
 	/* Report init done, unblock others. */
-	aad_wrt(&sgm->syn->ini_cpl, 1);
+	ns_atm(aad, wrt, rel, &sgm->syn->ini_cpl, 1);
 
 }
 
@@ -152,7 +146,7 @@ tb_sgm *tb_sgm_vopn(
 
 	/* Construct. */
 	tb_sgm *sgm = nh_all(sizeof(tb_sgm) + arr_nb * sizeof(void *));
-	ns_stg *stg = sgm->stg = nh_stg_vcrt_opn(&sgm->res, pth, args);
+	ns_stg *stg = sgm->stg = nh_stg_vopn(NH_FIL_ATT_RWC, &sgm->res, pth, args);
 	assert(stg, "storage %s open failed.\n", pth);
 
 	/* Compute the size. */
@@ -196,6 +190,8 @@ tb_sgm *tb_sgm_vopn(
 
 	/* Map the data block. */
 	void *dat = sgm->dat = ns_stg_map(stg, 0, TB_SGM_OFF_DAT, dat_siz, att_rws);
+	debug("dat siz %p, %UMiB, %UGiB.\n", dat_siz, dat_siz / (1024 * 1024), dat_siz / (1024 * 1024 * 1024));
+	debug("BND %p -> %p\n", dat, ns_psum(dat, dat_siz));
 	assert(dat);
 
 	/* Assign arrays. */
@@ -300,13 +296,12 @@ uerr tb_sgm_wrt_get(
 
 	/* Require lock priv. */
 	tb_sgm_syn *syn = sgm->syn;
-	const aad prv = aad_xch(&syn->wrt, 1);
+	const aad prv = ns_atm(aad, xch, aar, &syn->wrt, 1);
 
 	/* If someone already has it, fail. */
 	if (prv) return 1;
 
 	/* If we got it, initialize the write procedure. */
-	ns_bar_any_any();
 	*offp = syn->elm_nb;
 
 	/* Report success. */
@@ -351,7 +346,7 @@ uad tb_sgm_wrt_don(
 	uad wrt_nb
 )
 {
-	const uad elm_nb = aad_add_red(&sgm->syn->elm_nb, wrt_nb);
+	const uad elm_nb = ns_atm(aad, add_red, rel, &sgm->syn->elm_nb, wrt_nb);
 	assert(wrt_nb <= elm_nb);
 	assert(elm_nb <= sgm->dsc->elm_max);
 	return elm_nb;
@@ -375,8 +370,7 @@ u8 tb_sgm_wrt_cpl(
 	const u8 ful = (elm_nb == elm_max);
 
 	/* Update nb and clear write. */
-	ns_bar_any_any();
-	const uad prv = aad_xch(&syn->wrt, 0);
+	const uad prv = ns_atm(aad, xch, aar, &syn->wrt, 0);
 	assert(prv == 1);
 
 	/* Return the fullness. */
