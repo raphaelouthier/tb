@@ -99,9 +99,22 @@ Storage absolute size :
 Sizes for various storages :
 - one second : 64KiB + 24 * 1000 : 151.473 KiB. 
 - one minute : 64KiB + 24 * 60000 : 1.498 MiB. 
-- one hour : 64KiB + 24 * 3600000 : 155072 : 82.522 MiB. 
-- one day : 64KiB + 24 * 86400000 : 155072 : 1.931 GiB. 
-- one year (366 days) : 64KiB + 24 * 31622400000 : 155072 : 706.815 GiB. 
+- one hour : 64KiB + 24 * 3600000 : 82.522 MiB. 
+- one day : 64KiB + 24 * 86400000 : 1.931 GiB. 
+- one year (366 days) : 64KiB + 24 * 31622400000 : 706.815 GiB. 
+
+## Segment sizes per level
+
+Level 0 : (1 << 19) elements, (1 << 19) / (60 * 24 * 365) = 1.3 year of data per segment.
+Level 2 : (1 << 26) elements, around 5/6 day of data at 1ms data rate.
+
+## Index size
+
+Index is using segment lib -> cannot be resized on normal operation mode.
+
+Level 0 : 100 elements give 130 years of data. Enough.
+Level 2 : Objective : 50 years of data. 50 * 365 * (6/5) = 21900. -> 22K elements.
+
 
 # Architecture
 

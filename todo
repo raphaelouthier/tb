@@ -1,8 +1,8 @@
 
-TODO understand consistency model of C and implement my own.
-
-TODO actually define ns_bar_..._... to something
-
 TODO storage lib.
+
+TODO add a shared IMPL region in tb_sgm whose management is implementation-defined.
+
+TODO segment testbench : close and reload periodically.
 
 TODO storage testbench.
