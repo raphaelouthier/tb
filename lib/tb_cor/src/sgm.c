@@ -261,6 +261,7 @@ u8 tb_sgm_rdy(
 /*
  * Get read the @arr_nb read locations for @nb values
  * starting at @stt into @dst.
+ * @red_nb can be null.
  */
 void tb_sgm_red_rng(
 	tb_sgm *sgm,

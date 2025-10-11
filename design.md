@@ -25,8 +25,8 @@ Event-driven cumulated orderbook updates data.
 
 Composed of :
 - time.
-- for each price tick :
-  - total volume of pending orders at this tick. 
+- price tick
+- total volume of pending orders at this tick. 
 
 ## Level 3
 

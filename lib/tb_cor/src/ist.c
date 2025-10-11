@@ -31,8 +31,8 @@ void tb_ist_cln(
 	ns_map_fe(ist, &sys->ccys, ccy.ccys, str, in) {
 		nh_fre_(ist);
 	}
-	ns_map_str_init(&sys->shrs);
-	ns_map_str_init(&sys->ccys);
+	ns_map_str_ini(&sys->shrs);
+	ns_map_str_ini(&sys->ccys);
 	nh_spn_ulk(&sys->lck);
 }
 

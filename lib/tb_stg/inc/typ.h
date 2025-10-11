@@ -46,6 +46,9 @@ struct tb_stg_blk {
 	/* Blocks of the same index indexed by block number */
 	ns_mapn_u64 blks;
 
+	/* Index. */
+
+	tb_stg_idx *idx;
 	/* Segment. */
 	tb_sgm *sgm;
 
@@ -111,6 +114,9 @@ struct tb_stg_sys {
 
 	/* Number of active data interfaces. */
 	u32 itf_nb;
+
+	/* Segments initializer scratch. */
+	void *ini;
 
 };
 

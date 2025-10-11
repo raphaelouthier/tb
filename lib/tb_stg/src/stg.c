@@ -3,6 +3,128 @@
 #include <tb_stg/tb_stg.all.h>
 
 /*************************
+ * Segments initializers *
+ *************************/
+
+/*
+ * Generate the initializer for @idx.
+ * Return its length.
+ */
+static inline uad _ini_idx(
+	tb_stg_sys *sys,
+	const char *mkp,
+	const char *ist,
+	u8 lvl
+)
+{
+	char *ini = sys->ini;
+	uad nb = ns_str_cpy(ini, mkp);
+	ini[nb++] = '/';
+	nb += ns_str_cpy(ini + nb, ist);
+	ini[nb++] = '/';
+	assert(lvl < 4);
+	ini[nb++] = '0' + lvl;
+	ini[nb++] = '/';
+	return nb;
+}
+
+/*
+ * Generate the initializer for @blk.
+ * Return its length.
+ */
+static inline uad _ini_blk(
+	tb_stg_idx *idx,
+	u64 blk_nbr
+)
+{
+	char *ini = idx->sys->ini;
+	uad nb = _ini_idx(idx->sys, idx->mkp, idx->ist, idx->lvl); 
+	char *end = ns_u64_to_str_hex(blk_nbr, ini + nb, 16); 
+	return ns_psub(end, ini);
+}
+
+/*******************
+ * Level constants *
+ *******************/
+
+/*
+ * Determine the maximal number of elements
+ * that an index table of level @lvl has.
+ */
+static const uad lvl_to_idx_max[4] = {
+	100,
+	22000,
+	22000,
+	22000,
+};
+static u64 _idx_elm_max(
+	u8 lvl
+)
+{
+	/* See design.md. */
+	assert(lvl < 4);
+	return lvl_to_idx_max[lvl];
+}
+
+/*
+ * Determine the element sizeof elements that a block
+ * of level @lvl should contain.
+ */
+static const uad lvl_to_blk_max[4] = {
+	(1 << 19),
+	(1 << 19),
+	(1 << 26),
+	(1 << 26),
+};
+static inline uad _blk_elm_max(
+	u8 lvl
+)
+{
+	/* See design.md. */
+	assert(lvl < 4);
+	return lvl_to_blk_max[lvl];
+}
+
+/*
+ * Determine the number of arrays that a block
+ * of level @lvl should contain.
+ */
+static const u8 lvl_to_nb[4] = {
+	3, /* value, volume, prev */
+	5, /* time, bid, ask, vol, val. */
+	3, /* time, prc, vol. */
+	6, /* time, ord_id, trd_id, ord_typ, ord_val, ord_vol. */
+};
+static inline u8 _blk_arr_nb(
+	u8 lvl
+)
+{
+	/* See design.md. */
+	assert(lvl < 4);
+	return lvl_to_nb[lvl];
+}
+
+/*
+ * Determine the maximal number of elements that a block
+ * of level @lvl should contain.
+ */
+static const u8 *const (lvl_to_sizs[4]) = {
+	(u8 []) {8, 8, 4},
+	(u8 []) {8, 8, 8, 8, 8},
+	(u8 []) {8, 8, 8},
+	(u8 []) {8, 8, 8, 1, 8, 8},
+};
+static inline const u8 *_blk_elm_sizs(
+	u8 lvl
+)
+{
+	/* See design.md. */
+	assert(lvl < 4);
+	return lvl_to_sizs[lvl];
+}
+
+
+/*************************
  * Index table internals *
  *************************/
 
@@ -144,7 +266,7 @@ static inline void _blk_dtr(
 )
 {
 	assert(!blk->uctr);
-	ns_map_str_rem(&idx->blks, &blk->blks);
+	ns_map_u64_rem(&idx->blks, &blk->blks);
 	tb_sgm_cls(blk->sgm);
 	nh_fre_(blk);
 }
@@ -152,7 +274,7 @@ static inline void _blk_dtr(
 /*
  * Construct or load the block with number @nbr from storage.
  */
-static inline void _blk_ctr_lod(
+static inline tb_stg_blk *_blk_ctr_lod(
 	u8 ctr,
 	tb_stg_idx *idx,
 	u64 blk_nbr
@@ -160,21 +282,22 @@ static inline void _blk_ctr_lod(
 {
 
 	/* Generate the segment initializer. */
-	void *imp_ini = _blk_sgm_ini(mkp, ist, lvl);
-	uad elm_max = _blk_elm_max(lvl);
-	u8 elm_siz = _blk_elm_siz(lvl);
+	const uad imp_siz = _ini_blk(idx, blk_nbr);
+	const uad elm_max = _blk_elm_max(idx->lvl);
+	const u8 arr_nb = _blk_arr_nb(idx->lvl);
+	const u8 *elm_sizs = _blk_elm_sizs(idx->lvl);
 
 	/* Open the block segment, it should already exist. */
 	tb_sgm *sgm = tb_sgm_fopn(
 		ctr,
-		imp_ini,
+		idx->sys->ini,
 		imp_siz,
-		1,
+		arr_nb,
 		elm_max,
-		(u8 []) {elm_siz},  
-		"%s/%s/%s/%u/%U", sys->pth, mkp, ist, lvl, blk_nbr
+		elm_sizs,
+		"%s/%s/%s/%u/%U", idx->sys->pth, idx->mkp, idx->ist, idx->lvl, blk_nbr
 	);
-	assert(sgm, "segment %s/%s/%s/%u/%U open failed.\n", sys->pth, mkp, ist, lvl, blk_nbr);
+	assert(sgm, "segment %s/%s/%s/%u/%U open failed.\n", idx->sys->pth, idx->mkp, idx->ist, idx->lvl, blk_nbr);
 
 	/* Get the sync page. */
 	tb_stg_blk_syn *syn = tb_sgm_rgn(sgm, 0);
@@ -194,17 +317,17 @@ static inline void _blk_ctr_lod(
 /*
  * Load the block with number @nbr from storage.
  */
-static inline void _blk_lod(
+static inline tb_stg_blk *_blk_lod(
 	tb_stg_idx *idx,
 	u64 blk_nbr
-) {_blk_ctr_lod(0, idx, blk_nbr);}
+) {return _blk_ctr_lod(0, idx, blk_nbr);}
 
 /*
  * Construct a block and insert it at the end of
  * the index table.
  * Only called by the write sequence.
  */
-static inline void _blk_ctr(
+static inline tb_stg_blk *_blk_ctr(
 	tb_stg_idx *idx,
 	u64 stt_tim
 )
@@ -213,15 +336,19 @@ static inline void _blk_ctr(
 	assert(idx->key, "Index not writeable.\n");
 	
 	/* Determine the next block number. */
-	const u64 itb_max = _itb_max(idx); 
+	const u64 itb_max = _idx_elm_max(idx->lvl); 
+	assert(itb_max == tb_sgm_elm_max(idx->sgm));
 	const u64 itb_nb = _itb_nb(idx); 
 	assert(itb_nb != itb_max, "index table full.\n");
 
 	/* Determine the block number. */
-	_blk_ctr_lod(1, idx, itb_nb);
+	tb_stg_blk *blk = _blk_ctr_lod(1, idx, itb_nb);
 
 	/* Do not report the block yet in the index table,
 	 * as it has not data. */
+
+	/* Complete. */
+	return blk;
 
 }
 
@@ -301,7 +428,7 @@ static inline _own_ tb_stg_blk *_idx_lod(
 	tb_stg_blk *blk = ns_map_sch(&idx->blks, blk_nbr, u64, tb_stg_blk, blks);
 
 	/* Load the block if not. */
-	if (!blk) blk = _blk_lod(idx, blk, blk_nbr, tim);
+	if (!blk) blk = _blk_lod(idx, blk_nbr);
 	assert(blk);
 
 	/* Once a block is found, take it and return it. */
@@ -320,10 +447,11 @@ static inline void _idx_dtr(
 	assert(!idx->uctr);
 
 	/* Delete blocks. */
-	ns_map_fe(blk, &idx->blks, blks, str, in) {
+	tb_stg_blk *blk;
+	ns_map_fe(blk, &idx->blks, blks, u64, in) {
 		_blk_dtr(idx, blk);
 	}
-	assert(ns_map_str_empty(&idx->blks));
+	assert(ns_map_u64_emp(&idx->blks));
 
 	/* Delete. */
 	ns_map_str_rem(&sys->idxs, &idx->idxs);
@@ -385,7 +513,6 @@ uerr tb_stg_ini(
 	 */
 	nh_stt stt;
 	if (!nh_fs_tst(NH_FIL_TYP_DIR, 0, &stt, pth)) {
-		return
 		if (nh_fs_ftst(NH_FIL_TYP_STM, 0, &stt, "%s/stg", pth)) {
 			debug("Storage flag not present failed.\n");
 			return 1;
@@ -425,15 +552,16 @@ tb_stg_sys *tb_stg_ctr(
 	nh_stt stt;
 	assert(
 		(!nh_fs_tst(NH_FIL_TYP_DIR, 0, &stt, pth)) &&
-		(!nh_fs_ftst(NH_FIL_TYP_STM, 0, &stt, "%s/stg", pth))
+		(!nh_fs_ftst(NH_FIL_TYP_STM, 0, &stt, "%s/stg", pth)),
 		"%s : not a storage directory.\n", pth
 	);
 	
 	/* Allocate. */	
-	nh_all_(sys);
+	nh_all__(tb_stg_sys, sys);
 	sys->pth = nh_sall(pth);
 	ns_map_str_ini(&sys->idxs);
 	sys->itf_nb = 0;
+	sys->ini = nh_all(1024);
 
 	/* Complete. */
 	return sys;
@@ -456,10 +584,11 @@ void tb_stg_dtr(
 	_sys_cln(sys);
 
 	/* No index should remain. */
-	assert(ns_map_str_empty(&sys->idxs));
+	assert(ns_map_str_emp(&sys->idxs));
 
 	/* Free. */
-	nh_sfre(&sys->pth);
+	nh_fre(sys->ini, 1024);
+	nh_sfre(sys->pth);
 	nh_fre_(sys);
 }
 
@@ -467,6 +596,26 @@ void tb_stg_dtr(
 /*************
  * Index API *
  *************/
+
+static inline void _gen_idt(
+	char *dst,
+	const char *mkp,
+	const char *ist,
+	u8 lvl
+)
+{
+	const uad mkp_len = ns_str_len(mkp);
+	const uad ist_len = ns_str_len(ist);
+	assert(mkp_len < 21);
+	assert(ist_len < 21);
+	assert(lvl < 4);
+	ns_mem_cpy(dst, mkp, mkp_len);
+	dst[mkp_len] = '/';
+	ns_mem_cpy(dst + mkp_len + 1, ist, ist_len);
+	dst[mkp_len + ist_len + 1] = '/';
+	dst[mkp_len + ist_len + 2] = '0' + lvl; 
+	dst[mkp_len + ist_len + 3] = 0;
+}
 
 /*
  * Open and return the index for "@mkp:@ist:@lvl". 
@@ -490,7 +639,7 @@ tb_stg_idx *tb_stg_opn(
 	_gen_idt(idt, mkp, ist, lvl);
 
 	/* Search. */
-	tb_stg_idx *idx = ns_map_sch(&sys->idxs, str, idt, tb_stg_idx, idxs);
+	tb_stg_idx *idx = ns_map_sch(&sys->idxs, idt, str, tb_stg_idx, idxs);
 	if (idx) {
 		SAFE_INCR(idx->uctr);
 		SAFE_INCR(sys->itf_nb);
@@ -505,18 +654,18 @@ tb_stg_idx *tb_stg_opn(
 	 * and the level dir.
 	 * Ignore errors.
 	 */
-	nh_fs_crt_dir("%s/%s", sys->pth, mkp);
-	nh_fs_crt_dir("%s/%s/%s", sys->pth, mkp, ist);
-	nh_fs_crt_dir("%s/%s/%s/%u", sys->pth, mkp, ist, lvl);
+	nh_fs_fcrt_dir("%s/%s", sys->pth, mkp);
+	nh_fs_fcrt_dir("%s/%s/%s", sys->pth, mkp, ist);
+	nh_fs_fcrt_dir("%s/%s/%s/%u", sys->pth, mkp, ist, lvl);
 
 	/* Generate the segment initializer. */
-	void *imp_ini = _idx_sgm_ini(mkp, ist, lvl);
+	uad imp_siz = _ini_idx(sys, mkp, ist, lvl);
 	uad elm_max = _idx_elm_max(lvl);
 
 	/* Open the index segment. */
 	tb_sgm *sgm = tb_sgm_fopn(
 		1,
-		imp_ini,
+		sys->ini,
 		imp_siz,
 		1,
 		elm_max,
@@ -527,8 +676,8 @@ tb_stg_idx *tb_stg_opn(
 
 	/* Initialize. */
 	tb_str_cpy(idx->idt, idt);
-	assert(!ns_map_str_put(&sys->idxs, &idx->idxs, idx->idt);
-	ns_map_u64_ini(&sys->blks);
+	assert(!ns_map_str_put(&sys->idxs, &idx->idxs, idx->idt));
+	ns_map_u64_ini(&idx->blks);
 	idx->sys = sys; 
 	idx->lvl = lvl;
 	idx->sgm = sgm;
@@ -539,7 +688,7 @@ tb_stg_idx *tb_stg_opn(
 	tb_sgm_red_rng(
 		idx->sgm,
 		0,
-		blk_nb,
+		0,
 		(void **) &idx->tbl,
 		1
 	);
@@ -550,10 +699,11 @@ tb_stg_idx *tb_stg_opn(
 
 	/* Attempt to acquire write privileges if required. */
 	if (wrt) {
-		assert(!tb_sgm_wrt_get(sgm), "%s/%s/%u/idx : failed to acquire write privileges.\n", mkp, ist, lvl);
+		uad off = 0;
+		assert(!tb_sgm_wrt_get(sgm, &off), "%s/%s/%u/idx : failed to acquire write privileges.\n", mkp, ist, lvl);
 		assert(!idx->key);
-		*key = sys->key = nh_run_tim();
-		assert(sys->key);
+		*key = idx->key = nh_run_tim();
+		assert(idx->key);
 	}
 
 	/* Complete. */
@@ -575,9 +725,9 @@ void tb_stg_cls(
 
 	/* If required, release write priv. */
 	if (key) {
-		assert(key == sys->key);
-		sys->key = 0;
-		tb_sgm_wrt_cpl(sys->sgm);
+		assert(key == idx->key);
+		idx->key = 0;
+		tb_sgm_wrt_cpl(idx->sgm);
 	}
 
 	/* Unuse. */
@@ -600,7 +750,7 @@ void tb_stg_cls(
 _own_ tb_stg_blk *tb_stg_lod(
 	tb_stg_idx *idx,
 	u64 tim
-) {return _idx_lod(idx);}
+) {return _idx_lod(idx, tim);}
 
 /*
  * Unload @blk.
@@ -615,7 +765,7 @@ void tb_stg_unl(
  */
 uerr tb_stg_val_get(
 	tb_stg_blk *blk
-) {return !!ns_atm(acq, red, acq, &blk->syn->scd_ini);}
+) {return !!ns_atm(a64, red, acq, &blk->syn->scd_ini);}
 
 /*
  * Attempt to acquire the ownership of @blk's validation.
@@ -624,18 +774,18 @@ uerr tb_stg_val_get(
  */
 uerr tb_stg_val_ini(
 	tb_stg_blk *blk
-) {return !!ns_atm(aad, xch, aar, &blk->syn->scd_wip, 1);}
+) {return !!ns_atm(a64, xch, aar, &blk->syn->scd_wip, 1);}
 
 /*
  * Report @blk validated.
  */
-uerr tb_stg_val_set(
+void tb_stg_val_set(
 	tb_stg_blk *blk
 )
 {
-	assert(ns_atm(acq, red, acq, &blk->syn->scd_wip, 1));
-	assert(!ns_atm(acq, red, acq, &blk->syn->scd_ini));
-	ns_atm(aad, wrt, rel, &blk->syn->scd_wip, 1);
+	assert(ns_atm(a64, red, acq, &blk->syn->scd_wip));
+	assert(!ns_atm(a64, red, acq, &blk->syn->scd_ini));
+	ns_atm(a64, wrt, rel, &blk->syn->scd_wip, 1);
 }
 
 /*
@@ -651,14 +801,15 @@ void tb_sgm_arr(
 	u64 *nbp
 )
 {
-	const u64 nb = *nbp = tb_sgm_arr_nb(sgm);
+	const u64 nb = *nbp = tb_sgm_arr_nb(blk->sgm);
 	*timp = _blk_stt(blk);
+	assert(dst_nb == _blk_arr_nb(blk->idx->lvl));
 	return tb_sgm_red_rng(
 		blk->sgm, 	
 		0,
 		nb,
-		dst_nb,
-		_arr_nb(blk->idx->lvl)
+		dsts,
+		dst_nb
 	);
 }
 
@@ -667,7 +818,7 @@ void tb_sgm_arr(
  */
 void *tb_sgm_std(
 	tb_stg_blk *blk
-) {return _blk_std(blk);}
+) {return tb_sgm_rgn(blk->sgm, 1);}
 
 /*************
  * Write API *
@@ -694,7 +845,8 @@ void tb_stg_wrt(
 	assert(idx->key, "not a writeable index.\n");
 
 	/* Fetch the index table. */
-	const u64 blk_nb = _itb_nb(idx);
+	u64 blk_nb = _idx_elm_max(idx->lvl);
+	assert(blk_nb == tb_sgm_elm_max(idx->sgm));
 	volatile u64 (*tbl)[2] = idx->tbl;
 
 	/* Determine the last block. */
@@ -702,15 +854,18 @@ void tb_stg_wrt(
 
 	/* Write while data is available.
 	 * Check that block is always null when reiterating. */
-	for (;nb;{(assert(!blk);})) {
+	for (;nb;({assert(!blk);})) {
 
+		/* Get the start time of the data that we will write. */
+		const u64 stt = _dat_stt(idx, dat);
+		
 		/* Create a block if required. */
 		const u8 crt = (!blk);
-		if (crt) blk = _blk_ctr(idx);
+		if (crt) blk = _blk_ctr(idx, stt);
 
 		/* Determine the number of writeable elements. */
-		const uad blk_max = _blk_max(blk);
-		const uad blk_stt = _blk_nb(blk);
+		const uad blk_max = tb_sgm_elm_max(blk->sgm);
+		const uad blk_stt = tb_sgm_elm_nb(blk->sgm);
 		assert(blk_stt <= blk_max);
 		const uad blk_avl = blk_max - blk_stt;
 		
@@ -725,9 +880,6 @@ void tb_stg_wrt(
 		/* Determine the write size. */
 		const u64 wrt_nb = (nb < blk_avl) ? nb : blk_avl;
 
-		/* Get the start time of the data that we will write. */
-		const u64 stt = _dat_stt(idx, dat);
-		
 		/* Perform the write, update locations, return
 		 * the time of the last element. */
 		u64 end = _blk_wrt(
@@ -743,21 +895,24 @@ void tb_stg_wrt(
 		if (crt) {
 
 			/* Reference a new block in the index table. */
-			_itb_blk_stt_set, tbl, itb_nb + 1, stt);
+			_itb_blk_stt_set(tbl, blk_nb + 1, blk_nb, stt);
 
 			/* Report a new element in the index table. */
 			const uad itb_nxt = tb_sgm_wrt_don(idx->sgm, 1);
-			assert(itb_nxt == itb_nb + 1);
-			itb_nb = itb_nxt; 
+			assert(itb_nxt == blk_nb + 1);
+			blk_nb = itb_nxt; 
+			assert(blk_nb == _itb_nb(idx));
 
 		}
 
 		/* Report the block's end in the index table. */ 
-		_itb_blk_end_set(tbl, itb_nb, end);
+		_itb_blk_end_set(tbl, blk_nb, blk_nb - 1, end);
 
 		/* Reiterate. */ 
 		blk = 0;
 	}
+
+	assert(blk_nb == _itb_nb(idx));
 
 }
 

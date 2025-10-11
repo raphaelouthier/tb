@@ -46,7 +46,7 @@ static inline void _sys_ini(
 {
 	check(nh_spn_lkd(&sys->lck));
 	if (_mkp_ini) return;
-	ns_map_str_init(&sys->mkps);
+	ns_map_str_ini(&sys->mkps);
 	for (u32 mkp_id = 0; mkp_id < _mkps_nb; mkp_id++) {
 		ns_map_str_put(&sys->mkps, &_mkp_arr[mkp_id]->mkps, _mkp_arr[mkp_id]->sym);
 	}

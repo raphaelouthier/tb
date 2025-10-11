@@ -106,7 +106,7 @@ uerr tb_stg_val_ini(
 /*
  * Report @blk validated.
  */
-uerr tb_stg_val_set(
+void tb_stg_val_set(
 	tb_stg_blk *blk
 );
 

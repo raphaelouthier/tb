@@ -46,7 +46,7 @@ static inline void _sys_ini(
 {
 	check(nh_spn_lkd(&sys->lck));
 	if (_ccy_ini) return;
-	ns_map_str_init(&sys->ccys);
+	ns_map_str_ini(&sys->ccys);
 	for (u32 ccy_id = 0; ccy_id < _ccys_nb; ccy_id++) {
 		ns_map_str_put(&sys->ccys, &_ccy_arr[ccy_id]->ccys, _ccy_arr[ccy_id]->sym);
 	}

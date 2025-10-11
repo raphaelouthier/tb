@@ -183,7 +183,7 @@ tb_wlt *tb_wlt_ctr(
 )
 {
 	nh_all__(tb_wlt, wlt);
-	ns_map_uad_init(&wlt->asts);
+	ns_map_uad_ini(&wlt->asts);
 	_wlt_log("[%p] ctr.\n", wlt);
 	return wlt;
 }

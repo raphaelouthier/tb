@@ -214,6 +214,13 @@ static inline uad tb_sgm_elm_nb(
 ) {return ns_atm(aad, red, acq, &sgm->syn->elm_nb);}
 
 /*
+ * Return @sgm's maximal number of elements.
+ */
+static inline uad tb_sgm_elm_max(
+	tb_sgm *sgm
+) {return sgm->dsc->elm_max;}
+
+/*
  * Return the start of @sgm's @idx-th array.
  */
 static inline void *tb_sgm_arr_stt(
@@ -238,6 +245,7 @@ u8 tb_sgm_rdy(
 /*
  * Get the @arr_nb read locations for @nb values
  * starting at @stt into @dst.
+ * @red_nb can be null.
  */
 void tb_sgm_red_rng(
 	tb_sgm *sgm,
