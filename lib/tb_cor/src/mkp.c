@@ -78,7 +78,7 @@ tb_mkp *tb_mkp_sch(
 	tb_mkp_sys *sys = &_mkp_sys;
 	nh_spn_lck(&sys->lck); 
 	_sys_ini(sys);
-	tb_mkp *mkp = ns_map_search(&sys->mkps, sym, str, tb_mkp, mkps);
+	tb_mkp *mkp = ns_map_sch(&sys->mkps, sym, str, tb_mkp, mkps);
 	nh_spn_ulk(&sys->lck); 
 	return mkp;
 }

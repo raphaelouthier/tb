@@ -134,6 +134,7 @@ static inline void _imp_chk(
  * do match with the loaded content.
  */
 tb_sgm *tb_sgm_vopn(
+	u8 crt,
 	void *imp_ini,
 	uad imp_siz,
 	u8 arr_nb,
@@ -145,8 +146,9 @@ tb_sgm *tb_sgm_vopn(
 {
 
 	/* Construct. */
+	const u8 att = crt ? NH_FIL_ATT_RWC : NH_FIL_ATT_RW; 
 	tb_sgm *sgm = nh_all(sizeof(tb_sgm) + arr_nb * sizeof(void *));
-	ns_stg *stg = sgm->stg = nh_stg_vopn(NH_FIL_ATT_RWC, &sgm->res, pth, args);
+	ns_stg *stg = sgm->stg = nh_stg_vopn(att, &sgm->res, pth, args);
 	assert(stg, "storage %s open failed.\n", pth);
 
 	/* Compute the size. */

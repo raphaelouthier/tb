@@ -78,7 +78,7 @@ tb_ccy *tb_ccy_sch(
 	tb_ccy_sys *sys = &_ccy_sys;
 	nh_spn_lck(&sys->lck); 
 	_sys_ini(sys);
-	tb_ccy *ccy = ns_map_search(&sys->ccys, sym, str, tb_ccy, ccys);
+	tb_ccy *ccy = ns_map_sch(&sys->ccys, sym, str, tb_ccy, ccys);
 	nh_spn_ulk(&sys->lck); 
 	return ccy;
 }

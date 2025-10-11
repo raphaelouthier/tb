@@ -1,6 +1,11 @@
 
 TODO storage lib.
 
+TODO problem : we do not know the end time of the last block
+in advance. This means that we must atomically write u64s in
+the index table.
+-> index table accesses must be made atomic.
+
 TODO add a shared IMPL region in tb_sgm whose management is implementation-defined.
 
 TODO segment testbench : close and reload periodically.

@@ -1,6 +1,6 @@
 /* Copyright 2025 Raphael Outhier - confidential - proprietary - no copy - no diffusion. */
 
-#include <tb_cor/tb_cor.all.h>
+#include <tb_sgm/tb_sgm.all.h>
 
 /*
  * Shared synchronized data.
@@ -94,30 +94,30 @@ static inline uad _gat_pas(
 {
 
 	/* Sample the open count. */
-	uad gat_ctr = aad_red(&syn->gat_ctr);
+	uad gat_ctr = aad_red_aar(&syn->gat_ctr);
 
 	/* Wait at gate 0. */
-	uad stt0 = aad_inc_red(&syn->stt0);
+	uad stt0 = aad_inc_red_aar(&syn->stt0);
 	if (stt0 == syn->wrk_nb) {
-		assert(aad_red(&syn->gat0) == 0);
-		aad_wrt(&syn->gat1, 0);
-		aad_wrt(&syn->stt1, 0);
-		aad_wrt(&syn->gat0, 1);
-		uad gat_ctr1 = aad_inc_red(&syn->gat_ctr);
+		assert(aad_red_aar(&syn->gat0) == 0);
+		aad_wrt_aar(&syn->gat1, 0);
+		aad_wrt_aar(&syn->stt1, 0);
+		aad_wrt_aar(&syn->gat0, 1);
+		uad gat_ctr1 = aad_inc_red_aar(&syn->gat_ctr);
 		assert(gat_ctr1 == gat_ctr + 1);
 	} else {
-		while (!aad_red(&syn->gat0));
+		while (!aad_red_aar(&syn->gat0));
 	}
 
 	/* Wait at gate 1. */
-	uad stt1 = aad_inc_red(&syn->stt1);
+	uad stt1 = aad_inc_red_aar(&syn->stt1);
 	if (stt1 == syn->wrk_nb) {
-		assert(aad_red(&syn->gat1) == 0);
-		aad_wrt(&syn->gat0, 0);
-		aad_wrt(&syn->stt0, 0);
-		aad_wrt(&syn->gat1, 1);
+		assert(aad_red_aar(&syn->gat1) == 0);
+		aad_wrt_aar(&syn->gat0, 0);
+		aad_wrt_aar(&syn->stt0, 0);
+		aad_wrt_aar(&syn->gat1, 1);
 	} else {
-		while (!aad_red(&syn->gat1));
+		while (!aad_red_aar(&syn->gat1));
 	}
 
 	/* Return the sampled gate counter. */
@@ -154,6 +154,7 @@ static u32 _sgm_exc(
 #define ARR_NB 255
 	void *dsts[ARR_NB];
 	tb_sgm *sgm = tb_sgm_fopn(
+		1,
 		syn->dat,
 		imp_siz,
 		ARR_NB,
@@ -162,8 +163,8 @@ static u32 _sgm_exc(
 		syn->pth
 	);
 	assert(sgm);
-	assert(aad_red(&sgm->syn->ini_res) == 1);
-	assert(aad_red(&sgm->syn->ini_cpl) == 1);
+	assert(aad_red_aar(&sgm->syn->ini_res) == 1);
+	assert(aad_red_aar(&sgm->syn->ini_cpl) == 1);
 	assert(sgm->syn->ini_res == 1);
 	assert(sgm->syn->ini_cpl == 1);
 	//debug("%p %p.\n", sgm, sgm->syn);
@@ -177,7 +178,7 @@ static u32 _sgm_exc(
 		debug("ITR %p\n", siz_crt);
 
 		/* Reset the write failure counter. */
-		aad_wrt(&syn->fal_ctr, 0);
+		aad_wrt_aar(&syn->fal_ctr, 0);
 		
 		/* Pass the gate. */
 		GAT_PAS(syn);
@@ -190,24 +191,24 @@ static u32 _sgm_exc(
 			//debug("\r%u", i);
 			err = tb_sgm_wrt_get(sgm, &off);
 			if (!err) {
-				uad val = aad_red_inc(&syn->val_ctr);
-				aad_red_add(&syn->err_ctr, val);
+				uad val = aad_red_inc_aar(&syn->val_ctr);
+				aad_red_add_aar(&syn->err_ctr, val);
 				assert(!val);
-				val = aad_dec_red(&syn->val_ctr);
+				val = aad_dec_red_aar(&syn->val_ctr);
 				assert(!val);
-				aad_red_add(&syn->err_ctr, val);
+				aad_red_add_aar(&syn->err_ctr, val);
 				tb_sgm_wrt_cpl(sgm);
 			} else {
-				uad val = aad_red(&syn->val_ctr);
-				aad_red_add(&syn->fal_ctr, val);
-				val = aad_red(&syn->val_ctr);
-				aad_red_add(&syn->fal_ctr, val);
+				uad val = aad_red_aar(&syn->val_ctr);
+				aad_red_add_aar(&syn->fal_ctr, val);
+				val = aad_red_aar(&syn->val_ctr);
+				aad_red_add_aar(&syn->fal_ctr, val);
 			}
 		}
 		//debug("\n");
 
 		/* If any error was detected, stop. */
-		assert(!aad_red(&syn->err_ctr));
+		assert(!aad_red_aar(&syn->err_ctr));
 
 		/* Pass the gate. */
 		GAT_PAS(syn);
@@ -351,14 +352,14 @@ static inline void _tst_sgm(
 	syn->dat = dat;
 	syn->pth = stg_pth;
 	syn->wrk_nb = wrk_nb;
-	aad_wrt(&syn->gat0, 0);
-	aad_wrt(&syn->stt0, 0);
-	aad_wrt(&syn->gat1, 0);
-	aad_wrt(&syn->stt1, 0);
-	aad_wrt(&syn->gat_ctr, 0);
-	aad_wrt(&syn->fal_ctr, 0);
-	aad_wrt(&syn->val_ctr, 0);
-	aad_wrt(&syn->err_ctr, 0);
+	aad_wrt_aar(&syn->gat0, 0);
+	aad_wrt_aar(&syn->stt0, 0);
+	aad_wrt_aar(&syn->gat1, 0);
+	aad_wrt_aar(&syn->stt1, 0);
+	aad_wrt_aar(&syn->gat_ctr, 0);
+	aad_wrt_aar(&syn->fal_ctr, 0);
+	aad_wrt_aar(&syn->val_ctr, 0);
+	aad_wrt_aar(&syn->err_ctr, 0);
 
 	/* Create 15 workers and execute on our end too. */
 	u8 *thr_blk = nh_all(1024 * (uad) wrk_nb);

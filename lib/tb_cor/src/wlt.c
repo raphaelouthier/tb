@@ -18,7 +18,7 @@ tb_lib_log_def(cor, wlt);
  */
 static inline tb_ist *_ast_ist(
 	tb_ast *ast
-) {return (tb_ist *) ast->asts.value;}
+) {return (tb_ist *) ast->asts.val;}
 
 /*
  * Pring log data for @ast.
@@ -50,7 +50,7 @@ static inline tb_ast *_ast_sch(
 	tb_ist *ist
 )
 {
-	tb_ast *ast = ns_map_search(&wlt->asts, (uad) ist, uad, tb_ast, asts);
+	tb_ast *ast = ns_map_sch(&wlt->asts, (uad) ist, uad, tb_ast, asts);
 	if (ast) _ast_chk(wlt, ast);
 	return ast;
 }	
@@ -66,7 +66,7 @@ static inline void _ast_dtr(
 	_wlt_log("[%p] ast_del %@ : %d.\n",
 		wlt, tb_ist_dsc(_ast_ist(ast)), ast->amt);
 	_ast_chk(wlt, ast);
-	ns_map_uad_remove(&wlt->asts, &ast->asts);
+	ns_map_uad_rem(&wlt->asts, &ast->asts);
 	nh_fre_(ast);
 }
 

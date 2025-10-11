@@ -161,6 +161,7 @@ struct tb_sgm {
  * do match with the loaded content.
  */
 tb_sgm *tb_sgm_vopn(
+	u8 crt,
 	void *imp_ini,
 	uad imp_siz,
 	u8 arr_nb,
@@ -170,6 +171,7 @@ tb_sgm *tb_sgm_vopn(
 	va_list *args
 );
 static inline tb_sgm *tb_sgm_fopn(
+	u8 crt,
 	void *imp_ini,
 	uad imp_siz,
 	u8 arr_nb,
@@ -181,7 +183,7 @@ static inline tb_sgm *tb_sgm_fopn(
 {
 	va_list args;
 	va_start(args, pth);
-	tb_sgm *sgm = tb_sgm_vopn(imp_ini, imp_siz, arr_nb, elm_max, elm_sizs, pth, &args);
+	tb_sgm *sgm = tb_sgm_vopn(crt, imp_ini, imp_siz, arr_nb, elm_max, elm_sizs, pth, &args);
 	va_end(args);
 	return sgm;
 }
@@ -203,6 +205,13 @@ void tb_sgm_cls(
 static inline u8 tb_sgm_arr_nb(
 	tb_sgm *sgm
 ) {return sgm->dsc->arr_nb;}	
+
+/*
+ * Return @sgm's number of elements.
+ */
+static inline uad tb_sgm_elm_nb(
+	tb_sgm *sgm
+) {return ns_atm(aad, red, acq, &sgm->syn->elm_nb);}
 
 /*
  * Return the start of @sgm's @idx-th array.

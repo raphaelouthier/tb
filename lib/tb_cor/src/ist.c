@@ -52,7 +52,7 @@ tb_ist *tb_ist_ctr_shr(
 	/* Lock. */
 	tb_ist_sys *sys = &_sys;
 	nh_spn_lck(&sys->lck);
-	tb_ist *ist = ns_map_search(&sys->shrs, idt, str, tb_ist, shr.shrs);
+	tb_ist *ist = ns_map_sch(&sys->shrs, idt, str, tb_ist, shr.shrs);
 	if (!ist) {
 		nh_all_(ist);
 		tb_str_cpy(ist->nam, idt);
@@ -83,7 +83,7 @@ tb_ist *tb_ist_ctr_ccy(
 	/* Lock. */
 	tb_ist_sys *sys = &_sys;
 	nh_spn_lck(&sys->lck);
-	tb_ist *ist = ns_map_search(&sys->ccys, idt, str, tb_ist, ccy.ccys);
+	tb_ist *ist = ns_map_sch(&sys->ccys, idt, str, tb_ist, ccy.ccys);
 	if (!ist) {
 		nh_all_(ist);
 		tb_str_cpy(ist->nam, idt);

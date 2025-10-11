@@ -4,6 +4,7 @@ nh_cmps := nh_dft=hs
 
 # Ns
 .cf.ns.mlt := 64
+.cf.ns.a64 := 1
 .cf.nh.mv_dyn := 0
 .cf.nh.pmem := 1
 .cf.nh.dmem := 1
@@ -15,6 +16,7 @@ prj.tb:
 	$(call nm.arc,lib,lib_nh,../std,nh)
 	$(call nm.arc,lib,lib_us,../std,us)
 	$(call nm.arc,lib,lib_cor,lib,tb_cor)
+	$(call nm.arc,lib,lib_stg,lib,tb_stg)
 	$(call nm.stg,prc,lib)
 	$(call nm.obj,prc,prc_hs,../std,hs)
 	$(call nm.fobj,prc,prc_tb,prc,tb)
