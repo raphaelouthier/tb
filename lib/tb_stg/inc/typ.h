@@ -20,6 +20,26 @@ types(
  **************/
 
 /*
+ * Levels 1 and 2 contain a snapshot of the orderbook
+ * at the end of the block, so that orderbook
+ * reconstruction does not need to go many blocks behind.
+ * The snapshot of the orderbook is composed of :
+ * - nb, the number of tick levels saved (constant).
+ * - prc, the tick of the first volume element.
+ * - the volumes of the @nb ticks >= @prc, stored in
+ *   incremental tick levels starting at @prc.  
+ */
+
+/*
+ * Number of tick levels saved in orderbook snapshot.
+ * TODO review this.
+ */ 
+#define TB_STG_OBS_NB 1024 
+
+/* Number of bytes of an orderbook snapshot region. */
+#define TB_STG_RGN_SIZ_OBS ((sizeof(u64)) + ((TB_STG_OBS_NB) * sizeof(f64))) 
+
+/*
  * A data block is composed of first tier data fetched
  * directly from a provider, and of second tier data,
  * derived from first tier data of this block, or from

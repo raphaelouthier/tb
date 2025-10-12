@@ -74,7 +74,7 @@ void tb_stg_cls(
  * If @idx has a block covering @tim, load it in memory,
  * and return it.
  */
-_own_ tb_tg_blk *tb_stg_lod(
+_own_ tb_stg_blk *tb_stg_lod(
 	tb_stg_idx *idx,
 	u64 tim
 );
@@ -126,9 +126,9 @@ void tb_sgm_arr(
 /*
  * Return @blk's second tier data.
  */
-void tb_sgm_std(
+static inline void *tb_sgm_std(
 	tb_stg_blk *blk
-);
+) {return tb_sgm_rgn(blk->sgm, 1);}
 
 /*************
  * Write API *
@@ -142,11 +142,13 @@ void tb_sgm_std(
 
 /*
  * Generic data write.
+ * @stt is optional
  */
 void tb_stg_wrt(
 	tb_stg_idx *idx,
 	u64 nb,
-	void **dat
+	void **srcs,
+	u8 arr_nb
 );
 
 /*

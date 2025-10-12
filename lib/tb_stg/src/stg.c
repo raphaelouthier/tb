@@ -22,7 +22,7 @@ static inline uad _ini_idx(
 	ini[nb++] = '/';
 	nb += ns_str_cpy(ini + nb, ist);
 	ini[nb++] = '/';
-	assert(lvl < 4);
+	assert(lvl < 3);
 	ini[nb++] = '0' + lvl;
 	ini[nb++] = '/';
 	return nb;
@@ -48,68 +48,112 @@ static inline uad _ini_blk(
  *******************/
 
 /*
+ * Determine the index of the timestamp array
+ * in the arrays of level @lvl.
+ */
+static inline u8 _dat_tim_idx(
+	u8 lvl
+)
+{
+	/* Always at index 0. */
+	return 0;
+}
+
+/*
  * Determine the maximal number of elements
  * that an index table of level @lvl has.
  */
-static const uad lvl_to_idx_max[4] = {
-	100,
+static const uad _lvl_to_idx_max[3] = {
 	22000,
 	22000,
 	22000,
 };
-static u64 _idx_elm_max(
+static inline u64 _idx_elm_max(
 	u8 lvl
 )
 {
 	/* See design.md. */
-	assert(lvl < 4);
-	return lvl_to_idx_max[lvl];
+	assert(lvl < 3);
+	return _lvl_to_idx_max[lvl];
 }
 
 /*
  * Determine the element sizeof elements that a block
  * of level @lvl should contain.
  */
-static const uad lvl_to_blk_max[4] = {
-	(1 << 19),
+static const uad _lvl_to_blk_max[3] = {
 	(1 << 19),
 	(1 << 26),
 	(1 << 26),
 };
-static inline uad _blk_elm_max(
+static inline inline uad _blk_elm_max(
 	u8 lvl
 )
 {
 	/* See design.md. */
-	assert(lvl < 4);
-	return lvl_to_blk_max[lvl];
+	assert(lvl < 3);
+	return _lvl_to_blk_max[lvl];
+}
+
+/*
+ * Determine the number of regions that a block
+ * of level @lvl should contain.
+ */
+static const u8 _lvl_to_rgn_nb[3] = {
+	0, /* None. */
+	1, /* Orderbook state. */
+	1, /* Orderbook state. */
+};
+static inline inline u8 _blk_rgn_nb(
+	u8 lvl
+)
+{
+	/* See design.md. */
+	assert(lvl < 3);
+	return _lvl_to_rgn_nb[lvl];
+}
+
+/*
+ * Determine the region sizes that a block
+ * of level @lvl should contain.
+ */
+static const u64 *const (_lvl_to_rgn_sizs[3]) = {
+	(u64 []) {0},
+	(u64 []) {TB_STG_RGN_SIZ_OBS},
+	(u64 []) {TB_STG_RGN_SIZ_OBS},
+};
+static inline const u64 *_blk_rgn_sizs(
+	u8 lvl
+)
+{
+	/* See design.md. */
+	assert(lvl < 3);
+	return _lvl_to_rgn_sizs[lvl];
 }
 
 /*
  * Determine the number of arrays that a block
  * of level @lvl should contain.
  */
-static const u8 lvl_to_nb[4] = {
-	3, /* value, volume, prev */
+static const u8 _lvl_to_arr_nb[3] = {
 	5, /* time, bid, ask, vol, val. */
 	3, /* time, prc, vol. */
 	6, /* time, ord_id, trd_id, ord_typ, ord_val, ord_vol. */
 };
-static inline u8 _blk_arr_nb(
+static inline inline u8 _blk_arr_nb(
 	u8 lvl
 )
 {
 	/* See design.md. */
-	assert(lvl < 4);
-	return lvl_to_nb[lvl];
+	assert(lvl < 3);
+	return _lvl_to_arr_nb[lvl];
 }
 
 /*
  * Determine the maximal number of elements that a block
  * of level @lvl should contain.
  */
-static const u8 *const (lvl_to_sizs[4]) = {
-	(u8 []) {8, 8, 4},
+static const u8 *const (_lvl_to_elm_sizs[3]) = {
 	(u8 []) {8, 8, 8, 8, 8},
 	(u8 []) {8, 8, 8},
 	(u8 []) {8, 8, 8, 1, 8, 8},
@@ -119,9 +163,43 @@ static inline const u8 *_blk_elm_sizs(
 )
 {
 	/* See design.md. */
-	assert(lvl < 4);
-	return lvl_to_sizs[lvl];
+	assert(lvl < 3);
+	return _lvl_to_elm_sizs[lvl];
 }
+
+/*******************
+ * Data extraction *
+ *******************/
+
+/*
+ * Most of the historical data is not used by
+ * the storage library, with the exception of
+ * timestamps.
+ * As the data provider does not know at which element
+ * the storage will be full, we cannot expect it
+ * to provide the end timestamp of a block.
+ * On the other side, we need this timestamp,
+ * as blocks are indexed in the index table by
+ * their start and end times.
+ * Data is hence read with the only objective of
+ * finding an element's timestamp.
+ */
+
+/*
+ * Get the timestamp of the element of data of level
+ * @lvl stored at @srcs.
+ */
+static inline u64 _dat_tim(
+	u8 lvl,
+	void **srcs,
+	u64 idx
+
+)
+{
+	const u8 tid = _dat_tim_idx(lvl);
+	return ((u64 *) srcs[tid])[idx];
+}
+	
 
 
 /*************************
@@ -284,6 +362,8 @@ static inline tb_stg_blk *_blk_ctr_lod(
 	/* Generate the segment initializer. */
 	const uad imp_siz = _ini_blk(idx, blk_nbr);
 	const uad elm_max = _blk_elm_max(idx->lvl);
+	const u8 rgn_nb = _blk_rgn_nb(idx->lvl);
+	const u64 *rgn_sizs = _blk_rgn_sizs(idx->lvl);
 	const u8 arr_nb = _blk_arr_nb(idx->lvl);
 	const u8 *elm_sizs = _blk_elm_sizs(idx->lvl);
 
@@ -292,6 +372,8 @@ static inline tb_stg_blk *_blk_ctr_lod(
 		ctr,
 		idx->sys->ini,
 		imp_siz,
+		rgn_nb,
+		rgn_sizs,
 		arr_nb,
 		elm_max,
 		elm_sizs,
@@ -404,9 +486,76 @@ static inline u64 _blk_end(
 	return _itb_blk_end(tbl, blk_nb, _blk_nbr(blk));
 }
 
+/*
+ * Write @wrt_nb elements into @blk's @arr_nb arrays
+ * from the locations specified in @srcs.  
+ * Update @srcs with the refs of the next copy sources.
+ */
+static inline u64 _blk_wrt(
+	tb_stg_idx *idx,
+	tb_stg_blk *blk,
+	u64 wrt_nb,
+	void **srcs,
+	u8 arr_nb
+)
+{
+	check(arr_nb < 6);
+	check(arr_nb == _blk_arr_nb(idx->lvl));
+
+	/* Cache the timestamp of the last values. */
+	const u64 tim_end = _dat_tim(idx->lvl, srcs, wrt_nb);
+
+	/* Cache dests. */
+	void *dst[6];
+	tb_sgm_wrt_loc(blk->sgm, wrt_nb, dst, arr_nb);
+
+	/* Get arrays sizes. */
+	const u8 *elm_sizs = _blk_elm_sizs(idx->lvl);
+
+	/* Copy, update locations. */
+	for (u8 i = 0; i < arr_nb; i++) {
+		void *src = srcs[i];
+		const u64 siz = elm_sizs[i] * wrt_nb;
+		ns_mem_cpy(dst[i], src, siz);
+		srcs[i] = ns_psum(src, siz);
+	}
+
+	/* Return the end timestamp. */ 
+	return tim_end;
+
+}
+
+
 /*******************
  * Index internals *
  *******************/
+
+/*
+ * Return @idx's last block.
+ * If it doesn't exist, return 0.
+ * @idx must be opened with write privs.
+ */
+static inline tb_stg_blk *_idx_lst(
+	tb_stg_idx *idx
+)
+{
+	assert(idx->key);
+
+	/* Get the block number. */
+	const u64 blk_nb = _itb_nb(idx);
+	
+	/* Use the map. */
+	ns_mapn_u64 *nod = ns_map_u64_fi_inr(&idx->blks);
+	assert((!nod) == (!blk_nb));
+
+	/* If no node, fail. */
+	if (!nod) return 0;
+
+	/* If a node is found, check that its number is the maximum. */
+	assert(nod->val == (blk_nb - 1));
+	return ns_cnt_of(nod, tb_stg_blk, blks);
+
+}
 
 /*
  * If @idx has a block covering @tim,
@@ -608,7 +757,7 @@ static inline void _gen_idt(
 	const uad ist_len = ns_str_len(ist);
 	assert(mkp_len < 21);
 	assert(ist_len < 21);
-	assert(lvl < 4);
+	assert(lvl < 3);
 	ns_mem_cpy(dst, mkp, mkp_len);
 	dst[mkp_len] = '/';
 	ns_mem_cpy(dst + mkp_len + 1, ist, ist_len);
@@ -667,6 +816,8 @@ tb_stg_idx *tb_stg_opn(
 		1,
 		sys->ini,
 		imp_siz,
+		0,
+		0,
 		1,
 		elm_max,
 		(u8 []) {2 * sizeof(u64)},  
@@ -813,13 +964,6 @@ void tb_sgm_arr(
 	);
 }
 
-/*
- * Return @blk's second tier data.
- */
-void *tb_sgm_std(
-	tb_stg_blk *blk
-) {return tb_sgm_rgn(blk->sgm, 1);}
-
 /*************
  * Write API *
  *************/
@@ -838,7 +982,7 @@ void *tb_sgm_std(
 void tb_stg_wrt(
 	tb_stg_idx *idx,
 	u64 nb,
-	void **dat,
+	void **srcs,
 	u8 arr_nb
 )
 {
@@ -850,14 +994,15 @@ void tb_stg_wrt(
 	volatile u64 (*tbl)[2] = idx->tbl;
 
 	/* Determine the last block. */
-	tb_stg_blk *blk = _blk_lst(idx);
+	tb_stg_blk *blk = _idx_lst(idx);
 
 	/* Write while data is available.
 	 * Check that block is always null when reiterating. */
+	u64 prv_end = 0;
 	for (;nb;({assert(!blk);})) {
 
 		/* Get the start time of the data that we will write. */
-		const u64 stt = _dat_stt(idx, dat);
+		const u64 stt = _dat_tim(idx->lvl, srcs, 0);
 		
 		/* Create a block if required. */
 		const u8 crt = (!blk);
@@ -882,11 +1027,11 @@ void tb_stg_wrt(
 
 		/* Perform the write, update locations, return
 		 * the time of the last element. */
-		u64 end = _blk_wrt(
+		u64 end = prv_end = _blk_wrt(
+			idx,
 			blk,
-			blk_stt,
 			wrt_nb,
-			dat,
+			srcs,
 			arr_nb
 		);
 

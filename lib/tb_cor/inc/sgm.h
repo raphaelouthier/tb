@@ -8,12 +8,25 @@
  *******/
 
 /*
- * The segment library stores data in fixed size files
- * and supports single-writer multi-reader requests.
+ * The segment library stores shared data
+ * in fixed size files
  *
  * It uses shared memory mapped files as a base
  * memory accesses, and atomics to synchronize
  * the writes. 
+ *
+ * It provides the following types of storage areas :
+ * - shared memory regions of specified sizes, whose
+ *   management is left to the user.
+ * - shared synchronous memory arrays which can be read
+ *   by multiple entities at a time, and incrementally
+ *   written only once by a single writer at a time.
+ *   Arrays are synchronous in the sense that they all
+ *   have the same :
+ *   - number of elements.
+ *   - maximal number of elements.
+ *   but array element size can vary from one array to
+ *   the other.
  */
 
 /*********
@@ -36,7 +49,6 @@ types(
  * Mapped as shared RW.
  */
 struct tb_sgm_syn {
-
 
 	/* Set <=> initialization is reserved. */
 	volatile aad ini_res;
@@ -69,11 +81,20 @@ struct tb_sgm_dsc {
 	/* Data block total size. */
 	uad dat_siz;
 
+	/* Number of regions. */
+	u8 rgn_nb;
+
 	/* Number of arrays. */
 	u8 arr_nb;
+	
+	/* U64 aligned. */
+	u64 pad;
 
-	/* Arrays. */
-	u8 elm_sizs[];
+	/*
+	 * Next :
+	 * u64 rgn_sizs[rgn_nb];
+	 * u8 arr_sizs[rgn_nb];
+	 */
 
 };
 
@@ -97,14 +118,23 @@ struct tb_sgm {
 	/* Descriptor. */
 	tb_sgm_dsc *dsc;
 
+	/* Region sizes (points to @dsc). */
+	const u64 *rgn_sizs;
+
+	/* Array element sizes (points to @dsc). */
+	const u8 *elm_sizs;
+
 	/* Implementation descriptor. */
 	void *imp;
 
 	/* Data section. */
 	void *dat;
 
-	/* Array VAs. */
-	void *arrs[];
+	/* Regions VAs. */
+	void **rgns;
+
+	/* Arrays VAs. */
+	void **arrs;
 
 };
 
@@ -146,6 +176,9 @@ struct tb_sgm {
 /* Offset of the data block. */
 #define TB_SGM_OFF_DAT TB_SGM_PAG_RND((TB_SGM_OFF_IMP + TB_SGM_SIZ_IMP))
 
+/* Size of a region. */
+#define TB_SGM_SIZ_RGN(rgn_siz) TB_SGM_PAG_RND(rgn_siz)
+
 /* Size of an array block. */
 #define TB_SGM_SIZ_ARR(elm_nbr, elm_siz) TB_SGM_PAG_RND((elm_nbr * elm_siz))
 
@@ -164,6 +197,8 @@ tb_sgm *tb_sgm_vopn(
 	u8 crt,
 	void *imp_ini,
 	uad imp_siz,
+	u8 rgn_nb,
+	const u64 *rgn_sizs,
 	u8 arr_nb,
 	uad elm_max,
 	const u8 *elm_sizs,
@@ -174,6 +209,8 @@ static inline tb_sgm *tb_sgm_fopn(
 	u8 crt,
 	void *imp_ini,
 	uad imp_siz,
+	u8 rgn_nb,
+	const u64 *rgn_sizs,
 	u8 arr_nb,
 	uad elm_max,
 	const u8 *elm_sizs,
@@ -183,7 +220,18 @@ static inline tb_sgm *tb_sgm_fopn(
 {
 	va_list args;
 	va_start(args, pth);
-	tb_sgm *sgm = tb_sgm_vopn(crt, imp_ini, imp_siz, arr_nb, elm_max, elm_sizs, pth, &args);
+	tb_sgm *sgm = tb_sgm_vopn(
+		crt,
+		imp_ini,
+		imp_siz,
+		rgn_nb,
+		rgn_sizs,
+		arr_nb,
+		elm_max,
+		elm_sizs,
+		pth,
+		&args
+	);
 	va_end(args);
 	return sgm;
 }
@@ -194,6 +242,22 @@ static inline tb_sgm *tb_sgm_fopn(
 void tb_sgm_cls(
 	tb_sgm *sgm
 );
+
+/**************
+ * Region API *
+ **************/
+
+/*
+ * Return @sgm's @idx-th region.
+ */
+static inline void *tb_sgm_rgn(
+	tb_sgm *sgm,
+	u8 idx
+)
+{
+	assert(idx < sgm->dsc->rgn_nb);
+	return sgm->rgns[idx];
+}
 
 /************
  * Read API *

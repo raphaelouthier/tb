@@ -7,6 +7,7 @@
 
 #include <tb_stg/typ.h>
 
+#include <tb_stg/stg.h>
 
 #endif /* TB_COR_STG_ALL_H */
 

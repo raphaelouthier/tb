@@ -56,21 +56,44 @@ static inline void _sgm_ini_cpl(
 }
 
 /*
+ * Return @dsc's region size array.
+ */
+static inline u64 *_dsc_rgn_sizs(
+	tb_sgm_dsc *dsc
+) {return ns_psum(dsc, sizeof(tb_sgm_dsc));}
+
+/*
+ * Return @dsc's element size array.
+ */
+static inline u8 *_dsc_elm_sizs(
+	tb_sgm_dsc *dsc,
+	u8 rgn_nb
+) {return ns_psum(dsc, sizeof(tb_sgm_dsc) + rgn_nb * sizeof(u64));}
+
+/*
  * Initialize @dsc.
  */
 static inline void _dsc_ini(
 	tb_sgm_dsc *dsc,
 	u64 elm_max,
 	uad dat_siz,
+	u8 rgn_nb,
+	const u64 *rgn_sizs,
 	u8 arr_nb,
 	const u8 *elm_sizs
 )
 {
 	dsc->elm_max = elm_max;
 	dsc->dat_siz = dat_siz;
+	dsc->rgn_nb = rgn_nb;
 	dsc->arr_nb = arr_nb;
+	u64 *dsc_rgn_sizs = _dsc_rgn_sizs(dsc);
+	for (uint8_t rgn_idx = 0; rgn_idx < rgn_nb; rgn_idx++) {
+		dsc_rgn_sizs[rgn_idx] = rgn_sizs[rgn_idx];
+	}
+	u8 *dsc_elm_sizs = _dsc_elm_sizs(dsc, rgn_nb);
 	for (uint8_t arr_idx = 0; arr_idx < arr_nb; arr_idx++) {
-		dsc->elm_sizs[arr_idx] = elm_sizs[arr_idx];
+		dsc_elm_sizs[arr_idx] = elm_sizs[arr_idx];
 	}
 }
 
@@ -81,15 +104,23 @@ static inline void _dsc_chk(
 	tb_sgm_dsc *dsc,
 	u64 elm_max,
 	uad dat_siz,
+	u8 rgn_nb,
+	const u64 *rgn_sizs,
 	u8 arr_nb,
 	const u8 *elm_sizs
 )
 {
 	assert(dsc->elm_max == elm_max, "dsc mismatch : elm_max : expected %U, got %U.\n", elm_max, dsc->elm_max);
 	assert(dsc->dat_siz == dat_siz, "dsc mismatch : dat_siz : expected %p, got %p.\n", dat_siz, dsc->dat_siz);
+	assert(dsc->rgn_nb == rgn_nb, "dsc mismatch : rgn_nb : expected %u, got %u.\n", rgn_nb, dsc->rgn_nb);
 	assert(dsc->arr_nb == arr_nb, "dsc mismatch : arr_nb : expected %u, got %u.\n", arr_nb, dsc->arr_nb);
+	const u64 *dsc_rgn_sizs = _dsc_rgn_sizs(dsc);
+	for (uint8_t rgn_idx = 0; rgn_idx < rgn_nb; rgn_idx++) {
+		assert(dsc_rgn_sizs[rgn_idx] == rgn_sizs[rgn_idx], "dsc mismatch : rgn_sizs[%u] : expected %u, got %u.\n", rgn_idx, dsc_rgn_sizs[rgn_idx], rgn_sizs[rgn_idx]);
+	}
+	const u8 *dsc_elm_sizs = _dsc_elm_sizs(dsc, rgn_nb);
 	for (uint8_t arr_idx = 0; arr_idx < arr_nb; arr_idx++) {
-		assert(dsc->elm_sizs[arr_idx] == elm_sizs[arr_idx], "dsc mismatch : elm_sizs[%u] : expected %u, got %u.\n", arr_idx, dsc->elm_sizs[arr_idx], elm_sizs[arr_idx]);
+		assert(dsc_elm_sizs[arr_idx] == elm_sizs[arr_idx], "dsc mismatch : elm_sizs[%u] : expected %u, got %u.\n", arr_idx, dsc_elm_sizs[arr_idx], elm_sizs[arr_idx]);
 	}
 }
 
@@ -137,6 +168,8 @@ tb_sgm *tb_sgm_vopn(
 	u8 crt,
 	void *imp_ini,
 	uad imp_siz,
+	u8 rgn_nb,
+	const u64 *rgn_sizs,
 	u8 arr_nb,
 	u64 elm_max,
 	const u8 *elm_sizs,
@@ -153,6 +186,9 @@ tb_sgm *tb_sgm_vopn(
 
 	/* Compute the size. */
 	uad dat_siz = 0;
+	for (u8 rgn_idx = 0; rgn_idx < rgn_nb; rgn_idx++) {
+		dat_siz += TB_SGM_SIZ_RGN(rgn_sizs[rgn_idx]);
+	}
 	for (u8 arr_idx = 0; arr_idx < arr_nb; arr_idx++) {
 		dat_siz += TB_SGM_SIZ_ARR(elm_max, elm_sizs[arr_idx]);
 	}
@@ -181,14 +217,18 @@ tb_sgm *tb_sgm_vopn(
 	
 	/* Initialize if required. */
 	if (do_ini) {
-		_dsc_ini(dsc, elm_max, dat_siz, arr_nb, elm_sizs);
+		_dsc_ini(dsc, elm_max, dat_siz, rgn_nb, rgn_sizs, arr_nb, elm_sizs);
 		_imp_ini(sgm, imp_ini, imp_siz);
 		_sgm_ini_cpl(sgm);
 	}
 
 	/* Verify. */
-	_dsc_chk(dsc, elm_max, dat_siz, arr_nb, elm_sizs);
+	_dsc_chk(dsc, elm_max, dat_siz, rgn_nb, rgn_sizs, arr_nb, elm_sizs);
 	_imp_chk(sgm, imp_ini, imp_siz);
+
+	/* Assign size arrays. */
+	sgm->rgn_sizs = _dsc_rgn_sizs(dsc);
+	sgm->elm_sizs = _dsc_elm_sizs(dsc, rgn_nb);
 
 	/* Map the data block. */
 	void *dat = sgm->dat = ns_stg_map(stg, 0, TB_SGM_OFF_DAT, dat_siz, att_rws);
@@ -196,15 +236,29 @@ tb_sgm *tb_sgm_vopn(
 	debug("BND %p -> %p\n", dat, ns_psum(dat, dat_siz));
 	assert(dat);
 
-	/* Assign arrays. */
-	void *arr_stt = dat;
+	/* Assign regions. */
+	sgm->rgns = nh_all(sizeof(void *) * rgn_nb);
+	void *rgn_stt = dat;
 	uad _dat_siz = 0;
+	for (u8 rgn_idx = 0; rgn_idx < rgn_nb; rgn_idx++) {
+		sgm->rgns[rgn_idx] = rgn_stt;
+		const uad siz = TB_SGM_SIZ_RGN(rgn_sizs[rgn_idx]);
+		rgn_stt = ns_psum(rgn_stt, siz);
+		_dat_siz += siz;
+	}
+
+	/* Assign arrays. */
+	sgm->arrs = nh_all(sizeof(void *) * arr_nb);
+	void *arr_stt = rgn_stt;
+	_dat_siz = 0;
 	for (u8 arr_idx = 0; arr_idx < arr_nb; arr_idx++) {
 		sgm->arrs[arr_idx] = arr_stt;
 		const uad siz = TB_SGM_SIZ_ARR(elm_max, elm_sizs[arr_idx]);
 		arr_stt = ns_psum(arr_stt, siz);
 		_dat_siz += siz;
 	}
+
+	/* Check that we covered the required size. */
 	assert(dat_siz == _dat_siz);
 
 	/* Complete. */
@@ -278,7 +332,7 @@ void tb_sgm_red_rng(
 	const u64 sgm_end = NS_RED_ONC(syn->elm_nb);
 	check(elm_end <= sgm_end);
 	for (u8 arr_id = 0; arr_id < arr_nb; arr_id++) {
-		dst[arr_id] = ns_psum(sgm->arrs[arr_id], red_stt * sgm->dsc->elm_sizs[arr_id]);  
+		dst[arr_id] = ns_psum(sgm->arrs[arr_id], red_stt * sgm->elm_sizs[arr_id]);  
 	}
 }
 
@@ -333,7 +387,7 @@ uad tb_sgm_wrt_loc(
 	const uad wrt_end = wrt_stt + wrt_nb;
 	check(wrt_end <= sgm->dsc->elm_max);
 	for (u8 arr_id = 0; arr_id < arr_nb; arr_id++) {
-		dst[arr_id] = ns_psum(sgm->arrs[arr_id], wrt_stt * sgm->dsc->elm_sizs[arr_id]);  
+		dst[arr_id] = ns_psum(sgm->arrs[arr_id], wrt_stt * sgm->elm_sizs[arr_id]);  
 	}
 	return wrt_stt;
 }
