@@ -1,23 +1,17 @@
 /* Copyright 2025 Raphael Outhier - confidential - proprietary - no copy - no diffusion. */
 
-#include <tb_sgm/tb_sgm.all.h>
+#include <tb_stg/tb_stg.all.h>
+
+#include <stdlib.h>
+#include <unistd.h>
+
+#include <sys/types.h>
 
 /*
  * Shared synchronized data.
+ * Occupies the first region of the test segment.
  */
 typedef struct {
-
-	/* Seed. */
-	u64 sed;
-
-	/* Random data. */
-	u64 *dat;
-
-	/* Storage path. */
-	const char *pth;
-
-	/* Number of workers. */
-	u8 wrk_nb;
 
 	/* Gate 0. */
 	volatile aad gat0;
@@ -43,7 +37,42 @@ typedef struct {
 	/* Error. */
 	volatile aad err_ctr;
 
-} tb_tst_syn;
+} tb_sgm_tst_syn;
+
+/*
+ * Segment test per-thread descriptor.
+ */
+typedef struct {
+
+	/* Seed. */
+	u64 sed;
+
+	/* Segment implementation size. */
+	u64 imp_siz;
+
+	/* Random data. */
+	u64 *dat;
+
+	/* Storage path. */
+	const char *pth;
+
+	/* Number of workers. */
+	u8 wrk_nb;
+
+	/* Syn data. */
+	tb_sgm_tst_syn *syn;
+
+} tb_sgm_tst_dsc;
+
+/*
+ * Region sizes
+ */
+const u64 rgn_sizs[10] = {
+	1024, /* Sync region. */
+	10, 3, 1025,
+	2048, 4096, 65536,
+	65537, 1 << 22, 65535
+};
 
 /*
  * Element sizes.
@@ -89,16 +118,17 @@ const u8 elm_sizs[255] = {
  * Return the value of the gate counter before opening.
  */
 static inline uad _gat_pas(
-	tb_tst_syn *syn
+	tb_sgm_tst_dsc *dsc
 )
 {
+	tb_sgm_tst_syn *syn = dsc->syn;
 
 	/* Sample the open count. */
 	uad gat_ctr = aad_red_aar(&syn->gat_ctr);
 
 	/* Wait at gate 0. */
 	uad stt0 = aad_inc_red_aar(&syn->stt0);
-	if (stt0 == syn->wrk_nb) {
+	if (stt0 == dsc->wrk_nb) {
 		assert(aad_red_aar(&syn->gat0) == 0);
 		aad_wrt_aar(&syn->gat1, 0);
 		aad_wrt_aar(&syn->stt1, 0);
@@ -111,7 +141,7 @@ static inline uad _gat_pas(
 
 	/* Wait at gate 1. */
 	uad stt1 = aad_inc_red_aar(&syn->stt1);
-	if (stt1 == syn->wrk_nb) {
+	if (stt1 == dsc->wrk_nb) {
 		assert(aad_red_aar(&syn->gat1) == 0);
 		aad_wrt_aar(&syn->gat0, 0);
 		aad_wrt_aar(&syn->stt0, 0);
@@ -136,33 +166,94 @@ static inline uad _gat_pas(
 #define SGM_ELM_NB 0x1ffff
 
 /*
+ * If @sgm is set, close it.
+ * Then reload it and update @sgm.
+ */
+
+static inline void _sgm_lod(
+	tb_sgm **sgmp,
+	tb_sgm_tst_dsc *dsc
+)
+{
+
+	if (*sgmp) {
+		tb_sgm_cls(*sgmp);
+	}
+
+	/* Open. */
+#define RGN_NB 10
+#define ARR_NB 255
+	*sgmp = tb_sgm_fopn(
+		1,
+		dsc->dat,
+		dsc->imp_siz,
+		RGN_NB,
+		rgn_sizs,
+		ARR_NB,
+		SGM_ELM_NB,
+		elm_sizs,
+		dsc->pth
+	);
+
+	dsc->syn = tb_sgm_rgn(*sgmp, 0); 
+
+}
+
+/*
+ * Write regions of @dsc.
+ */
+static inline void _rgn_wrt(
+	tb_sgm_tst_dsc *dsc,
+	tb_sgm *sgm,
+	u8 itr_nb
+)
+{
+	u8 *src = (u8 *) dsc->dat + itr_nb;
+	for (u8 i = 1; i < 10; i++) {
+		u8 *dst = tb_sgm_rgn(sgm, i);
+		assert(dst);
+		u64 rgn_siz = rgn_sizs[i];
+		while (rgn_siz--) {
+			*(dst++) = *(src++); 
+		}
+	}
+}
+
+/*
+ * Check regions of @dsc.
+ */
+static inline void _rgn_red(
+	tb_sgm_tst_dsc *dsc,
+	tb_sgm *sgm,
+	u8 itr_nb
+)
+{
+	u8 *src = (u8 *) dsc->dat + itr_nb;
+	for (u8 i = 1; i < 10; i++) {
+		u8 *dst = tb_sgm_rgn(sgm, i);
+		assert(dst);
+		u64 rgn_siz = rgn_sizs[i];
+		while (rgn_siz--) {
+			check(*(dst++) == *(src++)); 
+		}
+	}
+}
+
+
+/*
  * Per-thread entrypoint.
  */
 static u32 _sgm_exc(
-	tb_tst_syn *syn
+	tb_sgm_tst_dsc *dsc
 )
 {
 
 	uad itr_ctr = 0;
 
-	/* Generate the impl section. */
-	const u64 imp_siz = ns_hsh_u32_rng(syn->sed, 128, 1025, 1);
-	assert(imp_siz <= 1024);
-	assert(1 <= imp_siz);
-
-	/* Open. */
-#define ARR_NB 255
-	void *dsts[ARR_NB];
-	tb_sgm *sgm = tb_sgm_fopn(
-		1,
-		syn->dat,
-		imp_siz,
-		ARR_NB,
-		SGM_ELM_NB,
-		elm_sizs,
-		syn->pth
-	);
+	tb_sgm *sgm = 0;
+	_sgm_lod(&sgm, dsc);
 	assert(sgm);
+
 	assert(aad_red_aar(&sgm->syn->ini_res) == 1);
 	assert(aad_red_aar(&sgm->syn->ini_cpl) == 1);
 	assert(sgm->syn->ini_res == 1);
@@ -174,14 +265,17 @@ static u32 _sgm_exc(
 	const uad siz_max = SGM_ELM_NB;
 	uad siz_sum = 0;
 	uad gat_ctr = 0;
+	void *dsts[ARR_NB];
+	u8 itr = 0;
 	while (siz_sum < siz_max) {
+		itr++;
 		debug("ITR %p\n", siz_crt);
 
 		/* Reset the write failure counter. */
-		aad_wrt_aar(&syn->fal_ctr, 0);
+		aad_wrt_aar(&dsc->syn->fal_ctr, 0);
 		
 		/* Pass the gate. */
-		GAT_PAS(syn);
+		GAT_PAS(dsc);
 
 		/* Attempt to lock 100000 times.
 		 * Verify that we only have one lock at a time. */
@@ -191,41 +285,41 @@ static u32 _sgm_exc(
 			//debug("\r%u", i);
 			err = tb_sgm_wrt_get(sgm, &off);
 			if (!err) {
-				uad val = aad_red_inc_aar(&syn->val_ctr);
-				aad_red_add_aar(&syn->err_ctr, val);
+				uad val = aad_red_inc_aar(&dsc->syn->val_ctr);
+				aad_red_add_aar(&dsc->syn->err_ctr, val);
 				assert(!val);
-				val = aad_dec_red_aar(&syn->val_ctr);
+				val = aad_dec_red_aar(&dsc->syn->val_ctr);
 				assert(!val);
-				aad_red_add_aar(&syn->err_ctr, val);
+				aad_red_add_aar(&dsc->syn->err_ctr, val);
 				tb_sgm_wrt_cpl(sgm);
 			} else {
-				uad val = aad_red_aar(&syn->val_ctr);
-				aad_red_add_aar(&syn->fal_ctr, val);
-				val = aad_red_aar(&syn->val_ctr);
-				aad_red_add_aar(&syn->fal_ctr, val);
+				uad val = aad_red_aar(&dsc->syn->val_ctr);
+				aad_red_add_aar(&dsc->syn->fal_ctr, val);
+				val = aad_red_aar(&dsc->syn->val_ctr);
+				aad_red_add_aar(&dsc->syn->fal_ctr, val);
 			}
 		}
 		//debug("\n");
 
 		/* If any error was detected, stop. */
-		assert(!aad_red_aar(&syn->err_ctr));
+		assert(!aad_red_aar(&dsc->syn->err_ctr));
 
 		/* Pass the gate. */
-		GAT_PAS(syn);
+		GAT_PAS(dsc);
 
 		/* If no collision, report it. */
-		if (syn->wrk_nb != 1) {
-			if (!syn->fal_ctr) {
+		if (dsc->wrk_nb != 1) {
+			if (!dsc->syn->fal_ctr) {
 				debug("NO COLLISION.\n");
 			}
 		}
 
 		/* Lock. */ 
-		if (syn->wrk_nb == 1) {
+		if (dsc->wrk_nb == 1) {
 			assert(!sgm->syn->wrt);
 		}
 		const u8 has_wrt = !tb_sgm_wrt_get(sgm, &off);
-		if (syn->wrk_nb == 1) {
+		if (dsc->wrk_nb == 1) {
 			assert(has_wrt);
 		}
 
@@ -233,12 +327,18 @@ static u32 _sgm_exc(
 		if (has_wrt) {
 			assert(off == siz_sum); 
 
-			/* Write in up to 8 passes. */
+			/* Write in up to 8 passes, reload in the middle. */
 			const uad pas_nb = (siz_crt > 8) ? 8 : 1;
+			const uad rld_pas = pas_nb >> 1;
 			assert(!(siz_crt % pas_nb));
 			const uad pas_siz = siz_crt / pas_nb;
 			uad wrt_siz = 0;
 			for (uad pas_idx = 0; pas_idx < pas_nb; pas_idx++) {
+
+				/* Reload. */
+				if (pas_idx == rld_pas) {
+					_sgm_lod(&sgm, dsc); 
+				}
 
 				/* Get offsets. */
 				tb_sgm_wrt_loc(sgm, pas_siz, dsts, ARR_NB);
@@ -248,7 +348,7 @@ static u32 _sgm_exc(
 					assert(dsts[i]);
 					assert(dsts[i] == ns_psum(sgm->arrs[i], (off + wrt_siz) * (uad) (i + 1)));
 					const uad len = pas_siz * (uad) (i + 1);
-					const void *src = ns_psum(syn->dat, (off + wrt_siz) * (uad) (i + 1));
+					const void *src = ns_psum(dsc->dat, (off + wrt_siz) * (uad) (i + 1));
 					ns_mem_cpy(dsts[i], src, len);
 				}
 
@@ -264,19 +364,30 @@ static u32 _sgm_exc(
 
 		}
 
+		/* Otherwise, reload. */
+		else {
+			_sgm_lod(&sgm, dsc); 
+		}
+
+		/* Now, everyone writes regions. */
+		_rgn_wrt(dsc, sgm, itr);
+
 		/* Report write. */
 		siz_sum += siz_crt;
 		assert(!(siz_sum & (siz_sum + 1)));
 		siz_crt <<= 1;
 
 		/* Pass the gate. */
-		GAT_PAS(syn);
+		GAT_PAS(dsc);
 
 		/* Unlock. */
 		if (has_wrt) tb_sgm_wrt_cpl(sgm);
 
 		/* Pass the gate. */
-		GAT_PAS(syn);
+		GAT_PAS(dsc);
+
+		/* Verify regions. */
+		_rgn_red(dsc, sgm, itr);
 
 		/* Verify data in up to 8 passes. */
 		{
@@ -298,7 +409,7 @@ static u32 _sgm_exc(
 					assert(dsts[i]);
 					assert(dsts[i] == ns_psum(sgm->arrs[i], ttl_red_siz * (uad) (i + 1)));
 					const uad len = red_siz * (uad) (i + 1);
-					const void *src = ns_psum(syn->dat, ttl_red_siz * (uad) (i + 1));
+					const void *src = ns_psum(dsc->dat, ttl_red_siz * (uad) (i + 1));
 					assert(!ns_mem_cmp(dsts[i], src, len));
 				}
 
@@ -313,9 +424,12 @@ static u32 _sgm_exc(
 		}
 
 		/* Pass the gate. */
-		GAT_PAS(syn);
+		GAT_PAS(dsc);
 
 	}
+
+	tb_sgm_cls(sgm);
+
 	assert(siz_sum == siz_max);
 	return 0;
 }
@@ -346,42 +460,87 @@ static inline void _tst_sgm(
 		ini = ns_hsh_mas_gen(ini);
 	}
 
-	/* Allocate the sync data. */
-	nh_all__(tb_tst_syn, syn);
-	syn->sed = sed;
-	syn->dat = dat;
-	syn->pth = stg_pth;
-	syn->wrk_nb = wrk_nb;
-	aad_wrt_aar(&syn->gat0, 0);
-	aad_wrt_aar(&syn->stt0, 0);
-	aad_wrt_aar(&syn->gat1, 0);
-	aad_wrt_aar(&syn->stt1, 0);
-	aad_wrt_aar(&syn->gat_ctr, 0);
-	aad_wrt_aar(&syn->fal_ctr, 0);
-	aad_wrt_aar(&syn->val_ctr, 0);
-	aad_wrt_aar(&syn->err_ctr, 0);
 
-	/* Create 15 workers and execute on our end too. */
-	u8 *thr_blk = nh_all(1024 * (uad) wrk_nb);
-	for (u8 i = 1; i < wrk_nb; i++) {
-		assert(!nh_thr_run(
-			ns_psum(thr_blk, 1024 * (uad) (i - 1)),
-			1024,
-			0,
-			(u32 (*)(void *)) &_sgm_exc,
-			syn
-		));
+	u8 thr = 0;
+	u8 del = 1;
+
+	/* If thread-based test : */ 
+	if (thr) {
+
+		/* Create workers and execute on our end too. */
+		u8 *thr_blk = nh_all(1024 * (uad) wrk_nb);
+		for (u8 i = 0; i < wrk_nb; i++) {
+
+			/* Allocate the descriptor. */
+			nh_all__(tb_sgm_tst_dsc, dsc);
+			dsc->sed = sed;
+			dsc->imp_siz = ns_hsh_u32_rng(sed, 128, 1025, 1);
+			dsc->dat = dat;
+			dsc->pth = stg_pth;
+			dsc->wrk_nb = wrk_nb;
+			dsc->syn = 0;
+			assert(dsc->imp_siz <= 1024);
+			assert(1 <= dsc->imp_siz);
+
+			/* Run or thread. */
+			if (i + 1 == wrk_nb) {
+				_sgm_exc(dsc);
+			} else {
+				assert(!nh_thr_run(
+					ns_psum(thr_blk, 1024 * (uad) (i)),
+					1024,
+					0,
+					(u32 (*)(void *)) &_sgm_exc,
+					dsc
+				));
+			}
+		}
+
+		/* Free the thread block. */
+		nh_fre(thr_blk, 1024 * (uad) wrk_nb);
+
+		/* Free the data block. */
+		nh_fre(dat, dat_siz);
+
 	}
-	_sgm_exc(syn);
 
-	/* Free the thread block. */
-	nh_fre(thr_blk, 1024 * (uad) wrk_nb);
+	/* If process-based testing, fork. */
+	else {
 
-	/* Free the data block. */
-	nh_fre(dat, dat_siz);
+		/* Allocate the descriptor. */
+		nh_all__(tb_sgm_tst_dsc, dsc);
+		dsc->sed = sed;
+		dsc->imp_siz = ns_hsh_u32_rng(sed, 128, 1025, 1);
+		dsc->dat = dat;
+		dsc->pth = stg_pth;
+		dsc->wrk_nb = wrk_nb;
+		dsc->syn = 0;
+		assert(dsc->imp_siz <= 1024);
+		assert(1 <= dsc->imp_siz);
+
+		/* Fork and determine if we're the master. */
+		for (u8 i = 1; i < wrk_nb; i++) {
+			pid_t pid = fork();
+			if (pid == 0) {
+				del = 0;
+				break;
+			}
+		}
+
+		/* Execute. */
+		_sgm_exc(dsc);
+
+		/* If we're not the master, exit now. */
+		if (!del) {
+			debug("Subprocess test done.\n");
+			exit(0);
+		}
+	}
 
 	/* Clean. */
-	nh_fs_del_stg(stg_pth);
+	if (del) {
+		nh_fs_del_stg(stg_pth);
+	}
 
 }
 

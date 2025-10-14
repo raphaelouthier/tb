@@ -1,14 +1,5 @@
-
-TODO make segment lib use a64s instead of aads
+TODO storage testbench.
 
 TODO when orderbook reconstruction lib is done, determine
 the number of price ticks to contains in the per-tb_stg_blk
 orderbook snapshot.
-
-TODO segment testbench : close and reload periodically.
-
-TODO segment testbench : test the region lib.
-
-TODO segment testbench : test multiprocessing using segment regions as shared metadata.
-
-TODO storage testbench.

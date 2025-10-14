@@ -17,19 +17,19 @@ static inline u8 _syn_ini(
 
 	/* Read the @ini_res, do the initialization if it is 0,
 	 * report init reserved in all cases. */ 
-	const u8 do_ini = !ns_atm(aad, xch, aar, &syn->ini_res, 1);
+	const u8 do_ini = !ns_atm(a64, xch, aar, &syn->ini_res, 1);
 
 	/* If initialization reserved by someone else,
 	 * wait for completion, then ensure visibility. */
 	if (!do_ini) {
-		while (!ns_atm(aad, red, acq, &syn->ini_cpl));
+		while (!ns_atm(a64, red, acq, &syn->ini_cpl));
 		return 0;
 	}
 
 	/* If we must do the initialization, lock, 
 	 * initialize @syn, and report that initialization
 	 * must be done. */
-	ns_atm(aad, wrt, rel, &syn->wrt, 1);
+	ns_atm(a64, wrt, rel, &syn->wrt, 1);
 	syn->elm_nb = 0;
 	return 1;
 	
@@ -47,11 +47,11 @@ static inline void _sgm_ini_cpl(
 	ns_stg_syn(sgm->stg, sgm->mtd, TB_SGM_SIZ_MTD); 
 
 	/* Unlock. */
-	const uad prv = ns_atm(aad, xch, aar, &sgm->syn->wrt, 0);
+	const u64 prv = ns_atm(a64, xch, aar, &sgm->syn->wrt, 0);
 	assert(prv == 1);
 
 	/* Report init done, unblock others. */
-	ns_atm(aad, wrt, rel, &sgm->syn->ini_cpl, 1);
+	ns_atm(a64, wrt, rel, &sgm->syn->ini_cpl, 1);
 
 }
 
@@ -76,7 +76,7 @@ static inline u8 *_dsc_elm_sizs(
 static inline void _dsc_ini(
 	tb_sgm_dsc *dsc,
 	u64 elm_max,
-	uad dat_siz,
+	u64 dat_siz,
 	u8 rgn_nb,
 	const u64 *rgn_sizs,
 	u8 arr_nb,
@@ -103,7 +103,7 @@ static inline void _dsc_ini(
 static inline void _dsc_chk(
 	tb_sgm_dsc *dsc,
 	u64 elm_max,
-	uad dat_siz,
+	u64 dat_siz,
 	u8 rgn_nb,
 	const u64 *rgn_sizs,
 	u8 arr_nb,
@@ -130,11 +130,11 @@ static inline void _dsc_chk(
 static inline void _imp_ini(
 	tb_sgm *sgm,
 	void *imp,
-	uad imp_siz
+	u64 imp_siz
 )
 {
 	assert(imp_siz <= TB_SGM_SIZ_IMP);
-	const uad zer_siz = TB_SGM_SIZ_IMP - imp_siz;
+	const u64 zer_siz = TB_SGM_SIZ_IMP - imp_siz;
 	ns_mem_cpy(sgm->imp, imp, imp_siz);
 	if (zer_siz) ns_mem_rst(ns_psum(sgm->imp, imp_siz), zer_siz); 
 }
@@ -145,14 +145,14 @@ static inline void _imp_ini(
 static inline void _imp_chk(
 	tb_sgm *sgm,
 	void *imp,
-	uad imp_siz
+	u64 imp_siz
 )
 {
 	assert(imp_siz <= TB_SGM_SIZ_IMP);
-	for (uad byt_idx = 0; byt_idx < imp_siz; byt_idx++) {
+	for (u64 byt_idx = 0; byt_idx < imp_siz; byt_idx++) {
 		assert(((volatile u8 *) sgm->imp)[byt_idx] == ((volatile u8 *) imp)[byt_idx], "imp mismatch at byte %u.\n", byt_idx);
 	}
-	for (uad byt_idx = imp_siz; byt_idx < TB_SGM_SIZ_IMP; byt_idx++) {
+	for (u64 byt_idx = imp_siz; byt_idx < TB_SGM_SIZ_IMP; byt_idx++) {
 		assert(((volatile u8 *) sgm->imp)[byt_idx] == 0, "imp mismatch at byte %u.\n", byt_idx);
 	}
 }
@@ -167,7 +167,7 @@ static inline void _imp_chk(
 tb_sgm *tb_sgm_vopn(
 	u8 crt,
 	void *imp_ini,
-	uad imp_siz,
+	u64 imp_siz,
 	u8 rgn_nb,
 	const u64 *rgn_sizs,
 	u8 arr_nb,
@@ -185,14 +185,14 @@ tb_sgm *tb_sgm_vopn(
 	assert(stg, "storage %s open failed.\n", pth);
 
 	/* Compute the size. */
-	uad dat_siz = 0;
+	u64 dat_siz = 0;
 	for (u8 rgn_idx = 0; rgn_idx < rgn_nb; rgn_idx++) {
 		dat_siz += TB_SGM_SIZ_RGN(rgn_sizs[rgn_idx]);
 	}
 	for (u8 arr_idx = 0; arr_idx < arr_nb; arr_idx++) {
 		dat_siz += TB_SGM_SIZ_ARR(elm_max, elm_sizs[arr_idx]);
 	}
-	const uad siz_tgt = TB_SGM_OFF_DAT + dat_siz;
+	const u64 siz_tgt = TB_SGM_OFF_DAT + dat_siz;
 
 	/* Resize. */
 	u64 siz_cur = ns_stg_siz(stg);
@@ -232,17 +232,15 @@ tb_sgm *tb_sgm_vopn(
 
 	/* Map the data block. */
 	void *dat = sgm->dat = ns_stg_map(stg, 0, TB_SGM_OFF_DAT, dat_siz, att_rws);
-	debug("dat siz %p, %UMiB, %UGiB.\n", dat_siz, dat_siz / (1024 * 1024), dat_siz / (1024 * 1024 * 1024));
-	debug("BND %p -> %p\n", dat, ns_psum(dat, dat_siz));
 	assert(dat);
 
 	/* Assign regions. */
 	sgm->rgns = nh_all(sizeof(void *) * rgn_nb);
 	void *rgn_stt = dat;
-	uad _dat_siz = 0;
+	u64 _dat_siz = 0;
 	for (u8 rgn_idx = 0; rgn_idx < rgn_nb; rgn_idx++) {
 		sgm->rgns[rgn_idx] = rgn_stt;
-		const uad siz = TB_SGM_SIZ_RGN(rgn_sizs[rgn_idx]);
+		const u64 siz = TB_SGM_SIZ_RGN(rgn_sizs[rgn_idx]);
 		rgn_stt = ns_psum(rgn_stt, siz);
 		_dat_siz += siz;
 	}
@@ -250,10 +248,9 @@ tb_sgm *tb_sgm_vopn(
 	/* Assign arrays. */
 	sgm->arrs = nh_all(sizeof(void *) * arr_nb);
 	void *arr_stt = rgn_stt;
-	_dat_siz = 0;
 	for (u8 arr_idx = 0; arr_idx < arr_nb; arr_idx++) {
 		sgm->arrs[arr_idx] = arr_stt;
-		const uad siz = TB_SGM_SIZ_ARR(elm_max, elm_sizs[arr_idx]);
+		const u64 siz = TB_SGM_SIZ_ARR(elm_max, elm_sizs[arr_idx]);
 		arr_stt = ns_psum(arr_stt, siz);
 		_dat_siz += siz;
 	}
@@ -269,7 +266,7 @@ tb_sgm *tb_sgm_vopn(
 /*
  * Destruct @sgm.
  */
-void tb_sgm_dtr(
+void tb_sgm_cls(
 	_own_ tb_sgm *sgm
 )
 {
@@ -283,8 +280,8 @@ void tb_sgm_dtr(
 	ns_stg_syn(stg, sgm->dat, sgm->dsc->dat_siz);
 
 	/* Unmap. */
-	ns_stg_ump(stg, sgm->mtd, TB_SGM_SIZ_MTD);
 	ns_stg_ump(stg, sgm->dat, sgm->dsc->dat_siz);
+	ns_stg_ump(stg, sgm->mtd, TB_SGM_SIZ_MTD);
 
 	/* Close. */
 	nh_stg_cls(&sgm->res);
@@ -304,10 +301,10 @@ void tb_sgm_dtr(
  */
 u8 tb_sgm_rdy(
 	tb_sgm *sgm,
-	uad elm_nb
+	u64 elm_nb
 )
 {
-	const uad sgm_elm_nb = NS_RED_ONC(sgm->syn->elm_nb);
+	const u64 sgm_elm_nb = NS_RED_ONC(sgm->syn->elm_nb);
 	assert(sgm_elm_nb <= sgm->dsc->elm_max);
 	return (elm_nb <= sgm_elm_nb);
 }
@@ -353,7 +350,7 @@ uerr tb_sgm_wrt_get(
 
 	/* Require lock priv. */
 	tb_sgm_syn *syn = sgm->syn;
-	const aad prv = ns_atm(aad, xch, aar, &syn->wrt, 1);
+	const u64 prv = ns_atm(a64, xch, aar, &syn->wrt, 1);
 
 	/* If someone already has it, fail. */
 	if (prv) return 1;
@@ -372,19 +369,19 @@ uerr tb_sgm_wrt_get(
  * Return the offset of the first element to write.
  * Write priv must be owned.
  */
-uad tb_sgm_wrt_loc(
+u64 tb_sgm_wrt_loc(
 	tb_sgm *sgm,
-	uad wrt_nb,
+	u64 wrt_nb,
 	void **dst,
 	u8 arr_nb
 )
 {
 	check(arr_nb == sgm->dsc->arr_nb);
-	check(wrt_nb < (uad) (u32) -1);
+	check(wrt_nb < (u64) (u32) -1);
 	tb_sgm_syn *syn = sgm->syn;
 	check(NS_RED_ONC(syn->wrt));
-	const uad wrt_stt = NS_RED_ONC(syn->elm_nb);
-	const uad wrt_end = wrt_stt + wrt_nb;
+	const u64 wrt_stt = NS_RED_ONC(syn->elm_nb);
+	const u64 wrt_end = wrt_stt + wrt_nb;
 	check(wrt_end <= sgm->dsc->elm_max);
 	for (u8 arr_id = 0; arr_id < arr_nb; arr_id++) {
 		dst[arr_id] = ns_psum(sgm->arrs[arr_id], wrt_stt * sgm->elm_sizs[arr_id]);  
@@ -398,12 +395,12 @@ uad tb_sgm_wrt_loc(
  * Report the write.
  * Return the next write index.
  */
-uad tb_sgm_wrt_don(
+u64 tb_sgm_wrt_don(
 	tb_sgm *sgm,
-	uad wrt_nb
+	u64 wrt_nb
 )
 {
-	const uad elm_nb = ns_atm(aad, add_red, rel, &sgm->syn->elm_nb, wrt_nb);
+	const u64 elm_nb = ns_atm(a64, add_red, rel, &sgm->syn->elm_nb, wrt_nb);
 	assert(wrt_nb <= elm_nb);
 	assert(elm_nb <= sgm->dsc->elm_max);
 	return elm_nb;
@@ -421,13 +418,13 @@ u8 tb_sgm_wrt_cpl(
 {
 	/* Verify write data, determine fullness. */
 	tb_sgm_syn *syn = sgm->syn;
-	const uad elm_nb = syn->elm_nb;
-	const uad elm_max = sgm->dsc->elm_max;
+	const u64 elm_nb = syn->elm_nb;
+	const u64 elm_max = sgm->dsc->elm_max;
 	assert(elm_nb <= elm_max);
 	const u8 ful = (elm_nb == elm_max);
 
 	/* Update nb and clear write. */
-	const uad prv = ns_atm(aad, xch, aar, &syn->wrt, 0);
+	const u64 prv = ns_atm(a64, xch, aar, &syn->wrt, 0);
 	assert(prv == 1);
 
 	/* Return the fullness. */

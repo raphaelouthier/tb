@@ -51,20 +51,20 @@ types(
 struct tb_sgm_syn {
 
 	/* Set <=> initialization is reserved. */
-	volatile aad ini_res;
+	volatile a64 ini_res;
 
 	/* Set <=> initialization is done. */
-	volatile aad ini_cpl;
+	volatile a64 ini_cpl;
 
 	/* Set <=> someone is writing. */
-	volatile aad wrt;
+	volatile a64 wrt;
 
 	/*
 	 * Effective number of elements in memory.
 	 * Readable by anyome, writeable only by the holder
 	 * of @wrt.
 	 */
-	volatile aad elm_nb;
+	volatile a64 elm_nb;
 
 };
 
@@ -76,10 +76,10 @@ struct tb_sgm_syn {
 struct tb_sgm_dsc {
 
 	/* Maximal number of elements in memory. */
-	uad elm_max;
+	u64 elm_max;
 
 	/* Data block total size. */
-	uad dat_siz;
+	u64 dat_siz;
 
 	/* Number of regions. */
 	u8 rgn_nb;
@@ -144,7 +144,7 @@ struct tb_sgm {
 
 /* Page size. Just needs to be a multiple of the machine's
  * actual page size. */
-#define TB_SGM_PAG_SIZ ((uad) (1 << 16)) 
+#define TB_SGM_PAG_SIZ ((u64) (1 << 16)) 
 
 /* Round up to a page. */
 #define TB_SGM_PAG_RND(x) (((x) + (TB_SGM_PAG_SIZ - 1)) & ~(TB_SGM_PAG_SIZ - 1))
@@ -196,11 +196,11 @@ struct tb_sgm {
 tb_sgm *tb_sgm_vopn(
 	u8 crt,
 	void *imp_ini,
-	uad imp_siz,
+	u64 imp_siz,
 	u8 rgn_nb,
 	const u64 *rgn_sizs,
 	u8 arr_nb,
-	uad elm_max,
+	u64 elm_max,
 	const u8 *elm_sizs,
 	const char *pth,
 	va_list *args
@@ -208,11 +208,11 @@ tb_sgm *tb_sgm_vopn(
 static inline tb_sgm *tb_sgm_fopn(
 	u8 crt,
 	void *imp_ini,
-	uad imp_siz,
+	u64 imp_siz,
 	u8 rgn_nb,
 	const u64 *rgn_sizs,
 	u8 arr_nb,
-	uad elm_max,
+	u64 elm_max,
 	const u8 *elm_sizs,
 	const char *pth,
 	...
@@ -273,14 +273,14 @@ static inline u8 tb_sgm_arr_nb(
 /*
  * Return @sgm's number of elements.
  */
-static inline uad tb_sgm_elm_nb(
+static inline u64 tb_sgm_elm_nb(
 	tb_sgm *sgm
-) {return ns_atm(aad, red, acq, &sgm->syn->elm_nb);}
+) {return ns_atm(a64, red, acq, &sgm->syn->elm_nb);}
 
 /*
  * Return @sgm's maximal number of elements.
  */
-static inline uad tb_sgm_elm_max(
+static inline u64 tb_sgm_elm_max(
 	tb_sgm *sgm
 ) {return sgm->dsc->elm_max;}
 
@@ -303,7 +303,7 @@ static inline void *tb_sgm_arr_stt(
  */
 u8 tb_sgm_rdy(
 	tb_sgm *sgm,
-	uad elm_nb
+	u64 elm_nb
 );
 
 /*
@@ -313,8 +313,8 @@ u8 tb_sgm_rdy(
  */
 void tb_sgm_red_rng(
 	tb_sgm *sgm,
-	uad stt,
-	uad nb,
+	u64 stt,
+	u64 nb,
 	void **dst,
 	u8 arr_nb
 );
@@ -330,7 +330,7 @@ void tb_sgm_red_rng(
  */
 uerr tb_sgm_wrt_get(
 	tb_sgm *sgm,
-	uad *offp
+	u64 *offp
 );
 
 /*
@@ -339,9 +339,9 @@ uerr tb_sgm_wrt_get(
  * Return the offset of the first element to write.
  * Write priv must be owned.
  */
-uad tb_sgm_wrt_loc(
+u64 tb_sgm_wrt_loc(
 	tb_sgm *sgm,
-	uad elm_nb,
+	u64 elm_nb,
 	void **dst,
 	u8 arr_nb
 );
@@ -351,9 +351,9 @@ uad tb_sgm_wrt_loc(
  * Write priv must be owned.
  * Return the next write index.
  */
-uad tb_sgm_wrt_don(
+u64 tb_sgm_wrt_don(
 	tb_sgm *sgm,
-	uad wrt_nb
+	u64 wrt_nb
 );
 
 /*
