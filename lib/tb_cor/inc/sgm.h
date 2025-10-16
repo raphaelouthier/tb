@@ -315,7 +315,7 @@ void tb_sgm_red_rng(
 	tb_sgm *sgm,
 	u64 stt,
 	u64 nb,
-	void **dst,
+	const void **dst,
 	u8 arr_nb
 );
 

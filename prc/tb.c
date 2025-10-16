@@ -1,4 +1,4 @@
-/* Copyright 2025 Raphael Outhier - confidential - proprietary - no copy - no diffusion. */
+/* Copyright 2024 Raphael Outhier - confidential - proprietary - no copy - no diffusion. */
 
 #include <tb_stg/tb_stg.all.h>
 
@@ -7,26 +7,137 @@
 
 #include <sys/types.h>
 
+/*********
+ * Paths *
+ *********/
+
+#define SGM_PTH "/home/bt/tb_tst_sgm"
+#define STG_PTH "/tmp/tb_tst_stg"
+
+/******************
+ * Test utilities *
+ ******************/
+
+/*
+ * Allocate a random data block of @dat_siz bytes.
+ */
+static inline void *_dat_all(
+	u64 dat_siz,
+	u64 sed
+)
+{
+	u64 *dat = nh_all(dat_siz);
+	u64 ini = sed;
+	const uad elm_nb = dat_siz / 8;
+	for (uad idx = 0; idx < elm_nb; idx++) {
+		dat[idx] = ini;
+		ini = ns_hsh_mas_gen(ini);
+	}
+	return dat;
+}
+
+/*
+ * Allocate an increasing time array.
+ */
+static inline u64 *_tim_all(
+	u64 nb,
+	u64 sed
+)
+{
+	u64 *tims = nh_xall(nb * sizeof(u64));
+	u64 val0 = ns_hsh_u32_rng(sed, 1, (u32) -1, 1);
+	for (u64 i = 0; i < nb; i++) {
+		tims[i] = val0;
+		val0 += 20;
+	}
+	return tims;
+}
+
+
+#define GAT_PAS(dsc) \
+	assert(gat_ctr == itr_ctr, "gate entry error\n"); \
+	itr_ctr++; \
+	gat_ctr = ns_gat_pas(&dsc->syn->gat); \
+	assert(gat_ctr == itr_ctr, "gate exit error\n");
+
+/*******************************
+ * Parallel testing primitives *
+ *******************************/
+
+#define TST_PRL(_prc, _fnc, _ini) ({ \
+	/* If thread-based test : */ \
+	if (!(_prc)) { \
+\
+		/* Create workers and execute on our end too. */ \
+		u8 *__thr_blk = nh_all(1024 * (uad) wrk_nb); \
+		for (u8 i = 0; i < wrk_nb; i++) { \
+			const u8 tst_prl_mst = (i + 1) == wrk_nb; \
+\
+			/* Allocate a descriptor. */ \
+			typeof(_ini) __arg = (_ini); \
+\
+			/* Run in a thread or ourselves. */ \
+			if (tst_prl_mst) { \
+				_fnc(__arg); \
+			} else { \
+				assert(!nh_thr_run( \
+					ns_psum(__thr_blk, 1024 * (uad) (i)), \
+					1024, \
+					0, \
+					(u32 (*)(void *)) &_fnc, \
+					__arg \
+				)); \
+			} \
+		} \
+\
+		/* Free the thread block. */ \
+		nh_fre(__thr_blk, 1024 * (uad) wrk_nb); \
+\
+	} \
+\
+	/* If process-based testing, fork. */ \
+	else { \
+\
+		/* Report which process is the original one. */ \
+		u8 tst_prl_mst = 1; \
+\
+		/* Fork and determine if we're the master. */ \
+		assert(wrk_nb == 1); \
+		for (u8 i = 1; i < wrk_nb; i++) { \
+			assert(0); \
+			pid_t __pid = fork(); \
+			if (__pid == 0) { \
+				tst_prl_mst = 0; \
+				break; \
+			} \
+		} \
+\
+		/* Allocate a descriptor. */ \
+		typeof(_ini) __arg = (_ini); \
+\
+		/* Execute. */ \
+		_fnc(__arg); \
+\
+		/* If we're not the master, exit now. */ \
+		if (!tst_prl_mst) { \
+			debug("Subprocess test done.\n"); \
+			exit(0); \
+		} \
+	} \
+})
+
+/*********************
+ * Segment testbench *
+ *********************/
+
 /*
  * Shared synchronized data.
  * Occupies the first region of the test segment.
  */
 typedef struct {
 
-	/* Gate 0. */
-	volatile aad gat0;
-
-	/* Gate 0 state. */
-	volatile aad stt0;
-
-	/* Gate 1. */
-	volatile aad gat1;
-
-	/* Gate 1 state. */
-	volatile aad stt1;
-
-	/* Gate pass counter. */
-	volatile aad gat_ctr;
+	/* Gate. */
+	ns_gat gat;
 
 	/* Write perm acquisistion failure counter. */
 	volatile aad fal_ctr;
@@ -37,7 +148,7 @@ typedef struct {
 	/* Error. */
 	volatile aad err_ctr;
 
-} tb_sgm_tst_syn;
+} tb_tst_sgm_syn;
 
 /*
  * Segment test per-thread descriptor.
@@ -60,9 +171,9 @@ typedef struct {
 	u8 wrk_nb;
 
 	/* Syn data. */
-	tb_sgm_tst_syn *syn;
+	tb_tst_sgm_syn *syn;
 
-} tb_sgm_tst_dsc;
+} tb_tst_sgm_dsc;
 
 /*
  * Region sizes
@@ -77,7 +188,7 @@ const u64 rgn_sizs[10] = {
 /*
  * Element sizes.
  */
-const u8 elm_sizs[255] = {
+const u8 _sgm_elm_sizs[255] = {
 	      0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07,
 	0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f,
 	0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17,
@@ -112,57 +223,6 @@ const u8 elm_sizs[255] = {
 	0xf8, 0xf9, 0xfa, 0xfb, 0xfc, 0xfd, 0xfe, 0xff
 };
 
-/*
- * Enter the gate and wait for all workers to be there.
- * Once they are all waiting, let them go.
- * Return the value of the gate counter before opening.
- */
-static inline uad _gat_pas(
-	tb_sgm_tst_dsc *dsc
-)
-{
-	tb_sgm_tst_syn *syn = dsc->syn;
-
-	/* Sample the open count. */
-	uad gat_ctr = aad_red_aar(&syn->gat_ctr);
-
-	/* Wait at gate 0. */
-	uad stt0 = aad_inc_red_aar(&syn->stt0);
-	if (stt0 == dsc->wrk_nb) {
-		assert(aad_red_aar(&syn->gat0) == 0);
-		aad_wrt_aar(&syn->gat1, 0);
-		aad_wrt_aar(&syn->stt1, 0);
-		aad_wrt_aar(&syn->gat0, 1);
-		uad gat_ctr1 = aad_inc_red_aar(&syn->gat_ctr);
-		assert(gat_ctr1 == gat_ctr + 1);
-	} else {
-		while (!aad_red_aar(&syn->gat0));
-	}
-
-	/* Wait at gate 1. */
-	uad stt1 = aad_inc_red_aar(&syn->stt1);
-	if (stt1 == dsc->wrk_nb) {
-		assert(aad_red_aar(&syn->gat1) == 0);
-		aad_wrt_aar(&syn->gat0, 0);
-		aad_wrt_aar(&syn->stt0, 0);
-		aad_wrt_aar(&syn->gat1, 1);
-	} else {
-		while (!aad_red_aar(&syn->gat1));
-	}
-
-	/* Return the sampled gate counter. */
-	return gat_ctr + 1;
-
-}
-
-#define GAT_PAS(syn) \
-	/*debug("GAT_IN\n"); */ \
-	assert(gat_ctr == itr_ctr, "SUUS0\n"); \
-	itr_ctr++; \
-	gat_ctr = _gat_pas(syn); \
-	assert(gat_ctr == itr_ctr, "SUUS1\n"); \
-	/*debug("GAT_OUT\n")*/;
-
 #define SGM_ELM_NB 0x1ffff
 
 /*
@@ -172,7 +232,7 @@ static inline uad _gat_pas(
 
 static inline void _sgm_lod(
 	tb_sgm **sgmp,
-	tb_sgm_tst_dsc *dsc
+	tb_tst_sgm_dsc *dsc
 )
 {
 
@@ -191,11 +251,12 @@ static inline void _sgm_lod(
 		rgn_sizs,
 		ARR_NB,
 		SGM_ELM_NB,
-		elm_sizs,
+		_sgm_elm_sizs,
 		dsc->pth
 	);
 
 	dsc->syn = tb_sgm_rgn(*sgmp, 0); 
+	dsc->syn->gat.wrk_nb = dsc->wrk_nb;
 
 }
 
@@ -203,7 +264,7 @@ static inline void _sgm_lod(
  * Write regions of @dsc.
  */
 static inline void _rgn_wrt(
-	tb_sgm_tst_dsc *dsc,
+	tb_tst_sgm_dsc *dsc,
 	tb_sgm *sgm,
 	u8 itr_nb
 )
@@ -223,7 +284,7 @@ static inline void _rgn_wrt(
  * Check regions of @dsc.
  */
 static inline void _rgn_red(
-	tb_sgm_tst_dsc *dsc,
+	tb_tst_sgm_dsc *dsc,
 	tb_sgm *sgm,
 	u8 itr_nb
 )
@@ -239,17 +300,13 @@ static inline void _rgn_red(
 	}
 }
 
-
 /*
  * Per-thread entrypoint.
  */
 static u32 _sgm_exc(
-	tb_sgm_tst_dsc *dsc
+	tb_tst_sgm_dsc *dsc
 )
 {
-
-	uad itr_ctr = 0;
-
 	tb_sgm *sgm = 0;
 	_sgm_lod(&sgm, dsc);
 	assert(sgm);
@@ -258,7 +315,6 @@ static u32 _sgm_exc(
 	assert(aad_red_aar(&sgm->syn->ini_cpl) == 1);
 	assert(sgm->syn->ini_res == 1);
 	assert(sgm->syn->ini_cpl == 1);
-	//debug("%p %p.\n", sgm, sgm->syn);
 
 	/* Iterate over the size range. */
 	uad siz_crt = 1;
@@ -267,6 +323,7 @@ static u32 _sgm_exc(
 	uad gat_ctr = 0;
 	void *dsts[ARR_NB];
 	u8 itr = 0;
+	uad itr_ctr = 0;
 	while (siz_sum < siz_max) {
 		itr++;
 		debug("ITR %p\n", siz_crt);
@@ -402,7 +459,7 @@ static u32 _sgm_exc(
 
 				/* Get offsets. */
 				assert(tb_sgm_rdy(sgm, ttl_red_siz + red_siz));
-				tb_sgm_red_rng(sgm, ttl_red_siz, red_siz, dsts, ARR_NB);
+				tb_sgm_red_rng(sgm, ttl_red_siz, red_siz, (const void **) dsts, ARR_NB);
 
 				/* Check offsets and write. */ 
 				for (u16 i = 0; i < ARR_NB; i++) {
@@ -434,6 +491,28 @@ static u32 _sgm_exc(
 	return 0;
 }
 
+static inline tb_tst_sgm_dsc *_sgm_dsc_gen(
+	u64 sed,
+	void *dat,
+	const char *stg_pth,
+	u8 wrk_nb
+)
+{
+	/* Allocate the descriptor. */
+	nh_all__(tb_tst_sgm_dsc, dsc);
+	dsc->sed = sed;
+	dsc->imp_siz = ns_hsh_u32_rng(sed, 128, 1025, 1);
+	dsc->dat = dat;
+	dsc->pth = stg_pth;
+	dsc->wrk_nb = wrk_nb;
+	dsc->syn = 0;
+	assert(dsc->imp_siz <= 1024);
+	assert(1 <= dsc->imp_siz);
+
+	/* Complete. */
+	return dsc;
+}
+
 /*
  * Segment testing.
  */
@@ -441,108 +520,398 @@ static inline void _tst_sgm(
 	nh_tst_sys *sys,
 	u64 sed,
 	u8 wrk_nb,
-	const char *stg_pth
+	u8 prc
 )
 {
 
 	/* Clean if needed. */
-	nh_fs_del_stg(stg_pth);
+	nh_fs_del_stg(SGM_PTH);
 
 	/* Use 255 arrays, ~100K elements,
 	 * 25MiB of random data. */
-	const uad elm_max = 0x1ffff;
+	const uad elm_max = SGM_ELM_NB;
 	const uad dat_siz = uad_alu((uad) elm_max * 256, 6);
-	u64 *dat = nh_all(dat_siz);
-	u64 ini = sed;
-	const uad elm_nb = dat_siz / 8;
-	for (uad idx = 0; idx < elm_nb; idx++) {
-		dat[idx] = ini;
-		ini = ns_hsh_mas_gen(ini);
-	}
+	void *dat = _dat_all(dat_siz, sed);
 
-
-	u8 thr = 0;
-	u8 del = 1;
-
-	/* If thread-based test : */ 
-	if (thr) {
-
-		/* Create workers and execute on our end too. */
-		u8 *thr_blk = nh_all(1024 * (uad) wrk_nb);
-		for (u8 i = 0; i < wrk_nb; i++) {
-
-			/* Allocate the descriptor. */
-			nh_all__(tb_sgm_tst_dsc, dsc);
-			dsc->sed = sed;
-			dsc->imp_siz = ns_hsh_u32_rng(sed, 128, 1025, 1);
-			dsc->dat = dat;
-			dsc->pth = stg_pth;
-			dsc->wrk_nb = wrk_nb;
-			dsc->syn = 0;
-			assert(dsc->imp_siz <= 1024);
-			assert(1 <= dsc->imp_siz);
-
-			/* Run or thread. */
-			if (i + 1 == wrk_nb) {
-				_sgm_exc(dsc);
-			} else {
-				assert(!nh_thr_run(
-					ns_psum(thr_blk, 1024 * (uad) (i)),
-					1024,
-					0,
-					(u32 (*)(void *)) &_sgm_exc,
-					dsc
-				));
-			}
-		}
-
-		/* Free the thread block. */
-		nh_fre(thr_blk, 1024 * (uad) wrk_nb);
-
-		/* Free the data block. */
-		nh_fre(dat, dat_siz);
-
-	}
-
-	/* If process-based testing, fork. */
-	else {
-
-		/* Allocate the descriptor. */
-		nh_all__(tb_sgm_tst_dsc, dsc);
-		dsc->sed = sed;
-		dsc->imp_siz = ns_hsh_u32_rng(sed, 128, 1025, 1);
-		dsc->dat = dat;
-		dsc->pth = stg_pth;
-		dsc->wrk_nb = wrk_nb;
-		dsc->syn = 0;
-		assert(dsc->imp_siz <= 1024);
-		assert(1 <= dsc->imp_siz);
-
-		/* Fork and determine if we're the master. */
-		for (u8 i = 1; i < wrk_nb; i++) {
-			pid_t pid = fork();
-			if (pid == 0) {
-				del = 0;
-				break;
-			}
-		}
-
-		/* Execute. */
-		_sgm_exc(dsc);
-
-		/* If we're not the master, exit now. */
-		if (!del) {
-			debug("Subprocess test done.\n");
-			exit(0);
-		}
-	}
+	/* Parallel testing. */
+	TST_PRL(prc, _sgm_exc, _sgm_dsc_gen(sed, dat, SGM_PTH, wrk_nb));	
 
 	/* Clean. */
-	if (del) {
-		nh_fs_del_stg(stg_pth);
-	}
+	nh_fs_del_stg(SGM_PTH);
+
+	/* Free the data block. */
+	nh_fre(dat, dat_siz);
 
 }
+
+/*********************
+ * Storage testbench *
+ *********************/
+
+/*
+ * Shared synchronized data.
+ * Occupies the first region of the test segment.
+ */
+typedef struct {
+
+	/* Gate. */
+	ns_gat gat;
+
+} tb_tst_stg_syn;
+
+/*
+ * Segment test per-thread descriptor.
+ */
+typedef struct {
+
+	/* Seed. */
+	u64 sed;
+
+	/* Segment implementation size. */
+	u64 imp_siz;
+
+	/* Random data. */
+	u64 *dat;
+
+	/* Times. */
+	u64 *tims;
+
+	/* Storage path. */
+	const char *pth;
+
+	/* Number of workers. */
+	u8 wrk_nb;
+
+	/* Syn data. */
+	tb_tst_stg_syn *syn;
+
+	/* Marketplace. */
+	const char *mkp;
+
+	/* Marketplace. */
+	const char *ist;
+
+	/* Level. */
+	u8 lvl;
+
+	/* Are we the ones with write privs ? */
+	u8 wrt;
+
+	/* Write key if @wrt is set. */
+	u64 key;
+
+} tb_tst_stg_dsc;
+
+static inline tb_tst_stg_dsc *_stg_dsc_gen(
+	u64 sed,
+	void *dat,
+	u64 *tims,
+	const char *stg_pth,
+	u8 wrk_nb,
+	const char *mkp,
+	const char *ist,
+	u8 wrt
+)
+{
+	/* Allocate the descriptor. */
+	nh_all__(tb_tst_stg_dsc, dsc);
+	dsc->sed = sed;
+	dsc->imp_siz = ns_hsh_u32_rng(sed, 128, 1025, 1);
+	dsc->dat = dat;
+	dsc->tims = tims;
+	dsc->pth = stg_pth;
+	dsc->wrk_nb = wrk_nb;
+	dsc->syn = 0;
+	dsc->mkp = mkp;
+	dsc->ist = ist;
+	dsc->lvl = 0;
+	dsc->wrt = wrt;
+	dsc->key = 0;
+	assert(dsc->imp_siz <= 1024);
+	assert(1 <= dsc->imp_siz);
+
+	/* Complete. */
+	return dsc;
+}
+
+/*
+ * If @stg is set, close it.
+ * Then reload it and update @stg.
+ */
+
+static inline void _stg_lod(
+	tb_stg_sys **sysp,
+	tb_stg_idx **idxp,
+	tb_tst_stg_dsc *dsc
+)
+{
+
+	assert((!*idxp) == (!*sysp));
+
+	if (*idxp) {
+		tb_stg_cls(*idxp, dsc->key);
+	} 
+	if (*sysp) {
+		tb_stg_dtr(*sysp);
+	}
+
+	tb_stg_ini(dsc->pth);
+
+	/* Open the system. */
+	*sysp = tb_stg_ctr(dsc->pth, 1);
+	dsc->syn = tb_stg_tst_syn(*sysp);
+	assert(dsc->syn);
+	dsc->syn->gat.wrk_nb = dsc->wrk_nb;
+
+	/* Open the index. */
+	*idxp = tb_stg_opn(*sysp, dsc->mkp, dsc->ist, dsc->lvl, dsc->wrt, &dsc->key);
+	assert(*idxp);
+	assert((!dsc->wrt) == (!dsc->key));
+
+}
+
+/*
+ * Get source data arrays for index @idx.
+ */
+static inline void _get_dat(
+	const void **dst,
+	u64 *tims,
+	void *dat,
+	u8 arr_nb,
+	u64 idx,
+	const u8 *elm_sizs
+)
+{
+	debug("idx %U.\n", idx);
+	debug("tim %U.\n", tims[0]);
+	assert(arr_nb);
+	assert(elm_sizs[0] == 8);
+	dst[0] = tims + idx;
+	debug("tim0 %U.\n", ((uint64_t *) dst[0])[0]);
+	
+	for (u8 i = 1; i < arr_nb; i++) {
+		dst[i] = ns_psum(dat, idx * (u64) elm_sizs[i]);
+	}
+}
+
+
+/*
+ * Per-thread level-specific entrypoint.
+ */
+static void _stg_exc_lvl(
+	tb_tst_stg_dsc *dsc,
+	u8 lvl
+)
+{
+
+	assert(lvl < 3);
+	dsc->lvl = lvl;
+
+	/* Gate debug. */
+	u64 gat_ctr = 0;
+	u64 itr_ctr = 0;
+
+	/* Load. */
+	tb_stg_sys *sys = 0;
+	tb_stg_idx *idx = 0;
+	_stg_lod(&sys, &idx, dsc);
+	assert(sys);
+	assert(idx);
+
+	assert(lvl < 3);
+	const u8 lvl_to_arr_nb[3] = {
+		5,
+		3,
+		6
+	};
+	const u8 *(lvl_to_elm_sizs[3]) = {
+		(u8 []) {8, 8, 8, 8, 8},
+		(u8 []) {8, 8, 8},
+		(u8 []) {8, 8, 8, 1, 8, 8},
+	};
+	const void *srcs[6];
+	const void *dsts[6];
+	const u8 arr_nb = lvl_to_arr_nb[lvl];
+	const u8 *_elm_sizs = lvl_to_elm_sizs[lvl];
+	assert(arr_nb <= 6);
+
+	/* Write the whole index table in 100 steps */
+	const u64 blk_siz = 3;
+	const u64 itb_siz = 2000;
+	const u64 elm_nb = blk_siz * itb_siz;
+	const u64 stp_nb = 3 * 50;
+	const u64 stp_elm_nb = elm_nb / stp_nb;
+
+	/* Cache the time array. */
+	u64 *tims = dsc->tims;
+
+	GAT_PAS(dsc);
+
+	/* Ensure that we're not always filling blocks
+	 * and that we fill the whole block area. */
+	assert(!(elm_nb % stp_nb));
+	assert(stp_elm_nb % blk_siz);
+
+	/* Chose a pseudo-random start time. */
+	u64 tim_stt = tims[0];
+	assert(tim_stt);
+	u64 tim_end = tim_stt;
+
+	/* Execute the required number of steps. */ 
+	u64 wrt_id = 0;
+	for (u64 stp_id = 0; stp_id < stp_nb; stp_id++) {
+		debug("step %U.\n", stp_id);
+
+		GAT_PAS(dsc);
+
+		/* Writer fills data, others just adjust the time
+		 * range. */
+		_get_dat(srcs, tims, dsc->dat, arr_nb, wrt_id, _elm_sizs);
+		tim_end = ((uint64_t *) srcs[0])[stp_elm_nb - 1];
+		u64 _tim = ((uint64_t *) srcs[0])[0];
+		if (dsc->wrt) {
+			tb_stg_wrt(idx, stp_elm_nb, srcs, arr_nb);
+		}
+		debug("_tim %U.\n", _tim);
+		wrt_id += stp_elm_nb;
+
+		/* Everyone unloads every 7 steps. */ 
+		const u8 unl = !(stp_id % 7);
+		if (unl) {
+			tb_stg_cls(idx, dsc->key);
+			tb_stg_dtr(sys);
+			idx = 0;
+			sys = 0;
+		}
+
+		GAT_PAS(dsc);
+
+		/* Everyone reloads if required. */
+		if (unl) {
+			_stg_lod(&sys, &idx, dsc);
+			assert(sys);
+			assert(idx);
+		}
+
+		/* Everyone verifies the index table. */
+		const u64 itb_nb = tb_sgm_elm_nb(idx->sgm);
+		/* previous line is syncing so all updates to itb should now be observed. */
+		const u64 itb_max = tb_sgm_elm_max(idx->sgm);
+		assert(itb_nb);
+		assert(itb_max == itb_siz); 
+		assert(itb_nb <= itb_max);
+		assert(itb_nb == (wrt_id + 2) / 3);  
+		volatile u64 (*itb)[2] = idx->tbl;
+		assert(itb[0][0] == tim_stt);
+		assert(itb[itb_nb - 1][1] == tim_end);
+		for (u64 blk_id = 0; blk_id < itb_nb; blk_id++) {
+			assert(itb[blk_id][0] <= itb[blk_id][1]);
+			assert((!blk_id) || (itb[blk_id - 1][1] < itb[blk_id][0]));
+			assert(itb[blk_id][0] == tims[3 * blk_id]);
+			if (blk_id + 1 == itb_nb) {
+				assert(
+					(itb[blk_id][1] == tims[3 * blk_id]) ||
+					(itb[blk_id][1] == tims[3 * blk_id + 1]) ||
+					(itb[blk_id][1] == tims[3 * blk_id + 2])
+				);
+			} else {
+				assert(itb[blk_id][0] < itb[blk_id][1]);
+				assert(itb[blk_id][1] == tims[3 * blk_id + 2]);
+			}
+		}
+
+		/* Everyone checks that they can access each block,
+		 * and that the block's data is the expected one. */
+		/* TODO */
+
+		assert(!tb_stg_lod(idx, tim_stt - 1));
+		assert(!tb_stg_lod(idx, tim_end + 1));
+
+		/* Check that start and end blocks can be accessed. */
+		tb_stg_blk *blk = 0;
+	    blk = tb_stg_lod(idx, tim_stt);
+		assert(blk);
+		tb_stg_unl(blk);
+		blk = tb_stg_lod(idx, tim_end);
+		assert(blk);
+		tb_stg_unl(blk);
+
+		/* Generate the expected values. */
+		_get_dat(srcs, tims, dsc->dat, arr_nb, 0, _elm_sizs);
+
+		/* Iterate over all blocks. */
+		u64 red_id = 0;
+		tb_stg_red(idx, tim_stt, tim_end, dsts, arr_nb) {
+			for (u8 arr_id = 0; arr_id < arr_nb; arr_id++) {
+				const u8 elm_siz = _elm_sizs[arr_id];
+				if (elm_siz == 1) {
+					assert(((u8 *) dsts[arr_id])[blk_id] == ((u8 *) srcs[arr_id])[red_id]);
+				} else {
+					assert(elm_siz == 8);
+					assert(((u64 *) dsts[arr_id])[blk_id] == ((u64 *) srcs[arr_id])[red_id]);
+				}
+			}
+			red_id++;
+		}	
+	}
+
+	/* Unload. */
+	tb_stg_cls(idx, dsc->key);
+	tb_stg_dtr(sys);
+
+}
+
+/*
+ * Per-thread entrypoint.
+ */
+static u32 _stg_exc(
+	tb_tst_stg_dsc *dsc
+)
+{
+	_stg_exc_lvl(dsc, 0);
+	return 0;
+	_stg_exc_lvl(dsc, 1);
+	_stg_exc_lvl(dsc, 2);
+	return 0;
+}
+
+/*
+ * Storage testing.
+ */
+static inline void _tst_stg(
+	nh_tst_sys *sys,
+	u64 sed,
+	u8 wrk_nb,
+	u8 prc
+)
+{
+
+
+	/* Clean if needed. */
+	system("rm -rf "STG_PTH);
+
+	/* 2000 blocks * 3 u64 elements */
+	const uad dat_siz = uad_alu((uad) 2000 * 3 * sizeof(u64), 6);
+	void *dat = _dat_all(dat_siz, sed);
+
+	/* Allocate times. */
+	u64 *tims = _tim_all(2000 * 3, sed);
+
+	const char *mkp = "MKP";
+	const char *ist = "IST";
+
+	/* Parallel testing. */
+	TST_PRL(prc, _stg_exc, _stg_dsc_gen(sed, dat, tims, STG_PTH, wrk_nb, mkp, ist, tst_prl_mst));	
+
+	/* Clean if needed. */
+	system("rm -rf "STG_PTH);
+
+	/* Free the data block. */
+	nh_fre(dat, dat_siz);
+	nh_xfre(tims);
+
+}
+
 
 /**********************
  * Reproduction tests *
@@ -562,9 +931,6 @@ static inline void _tst_rpr(
 
 #define tst(nam, ...) ({tst_cnt++; _tst_##nam(sys, sed, ##__VA_ARGS__); nh_tst_run(sys, thr_nb);})
 
-//#define SGM_PTH "/tmp/tb_sgm_tst"
-#define SGM_PTH "/home/bt/tb_sgm_tst"
-
 /*
  * Run one test.
  */
@@ -572,20 +938,23 @@ static u32 _mux_one(
 	u32 argc,
 	char **argv,
 	u64 sed,
-	u8 thr_nb
+	u8 thr_nb,
+	u8 prc
 )
 {
 	NS_ARG_OPTS(
-		"bpyr", argc, argv,
+		"one", argc, argv,
 		return 1;,
 		"execute a single test.",
-		(1, flg, rpr, (rpr), "run reproduction tests."),
-		(1, flg, sgm, (sgm), "run segment tests.")
+		(0, flg, rpr, (rpr), "run reproduction tests."),
+		(0, flg, sgm, (sgm), "run segment tests."),
+		(0, flg, stg, (stg), "run storage tests.")
 	);
 	u32 tst_cnt = 0;
 	nh_tst_sys *sys = nh_tst_sys_ctr();
 	if (rpr__flg) tst(rpr); 
-	if (sgm__flg) tst(sgm, thr_nb, SGM_PTH); 
+	if (sgm__flg) tst(sgm, thr_nb, prc); 
+	if (stg__flg) tst(stg, thr_nb, prc); 
 	assert(nh_tst_don(sys));
 	debug("tb tests : %u testbenches ran, %U sequences, %U unit tests, %U errors.\n", tst_cnt, sys->seq_cnt, sys->unt_cnt, sys->err_cnt);
 	u32 ret = sys->err_cnt != 0;
@@ -600,13 +969,15 @@ static u32 _mux_all(
 	u32 argc,
 	char **argv,
 	u64 sed,
-	u8 thr_nb
+	u8 thr_nb,
+	u8 prc
 )
 {
 	u32 tst_cnt = 0;
 	nh_tst_sys *sys = nh_tst_sys_ctr();
 	tst(rpr);
-	tst(sgm, thr_nb, SGM_PTH);
+	tst(sgm, thr_nb, prc);
+	tst(stg, thr_nb, prc);
 	assert(nh_tst_don(sys));
 	debug("tb tests : %u testbenches ran, %U sequences, %U unit tests, %U errors.\n", tst_cnt, sys->seq_cnt, sys->unt_cnt, sys->err_cnt);
 	u32 ret = sys->err_cnt != 0;
@@ -632,6 +1003,7 @@ static u32 _tst_main(
 		" test entrypoint",
 		(0, u64, sed, (s, sed, seed), "seed."),
 		(0, (dbu8, 1, 1, 255), nb_thr, (n, nb), "number of threads (default 1)."),
+		(0, flg, thr, (thr), "run parallel tests using thread instead of processes."),
 		(0, flg, err, (e, err), "halt on error.")
 	);
 
@@ -641,13 +1013,16 @@ static u32 _tst_main(
 	/* If no seed provided, choose one arbitrarily. */
 	if (!sed__flg) {
 		sed = nh_tst_sed_gen();
-	}	
+	}
+
+	/* If specified, use threads. Otherwise, use processes. */
+	const u8 prc = !thr__flg;
 	
 	info("Running TB tests with %u threads.\n", nb_thr); 
 	info("Seed : %H.\n", sed);
 
 	u32 ret = 1;
-	NS_ARG_SEL(argc, argv, "tb", (sed, nb_thr), ret,
+	NS_ARG_SEL(argc, argv, "tb", (sed, nb_thr, prc), ret,
 		("one", _mux_one, "run a specified test."),
 		("all", _mux_all, "run all tests.")
 	);

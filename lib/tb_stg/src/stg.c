@@ -69,12 +69,13 @@ static const uad _lvl_to_idx_max[3] = {
 	22000,
 };
 static inline u64 _idx_elm_max(
+	u8 tst,
 	u8 lvl
 )
 {
 	/* See design.md. */
 	assert(lvl < 3);
-	return _lvl_to_idx_max[lvl];
+	return tst ? 2000 : _lvl_to_idx_max[lvl];
 }
 
 /*
@@ -87,12 +88,13 @@ static const uad _lvl_to_blk_max[3] = {
 	(1 << 26),
 };
 static inline inline uad _blk_elm_max(
+	u8 tst,
 	u8 lvl
 )
 {
 	/* See design.md. */
 	assert(lvl < 3);
-	return _lvl_to_blk_max[lvl];
+	return tst ? 3 : _lvl_to_blk_max[lvl];
 }
 
 /*
@@ -100,9 +102,9 @@ static inline inline uad _blk_elm_max(
  * of level @lvl should contain.
  */
 static const u8 _lvl_to_rgn_nb[3] = {
-	0, /* None. */
-	1, /* Orderbook state. */
-	1, /* Orderbook state. */
+	1, /* Syn. */
+	2, /* Syn + Orderbook state. */
+	3, /* Syn + Orderbook state. */
 };
 static inline inline u8 _blk_rgn_nb(
 	u8 lvl
@@ -191,13 +193,13 @@ static inline const u8 *_blk_elm_sizs(
  */
 static inline u64 _dat_tim(
 	u8 lvl,
-	void **srcs,
+	const void **srcs,
 	u64 idx
 
 )
 {
 	const u8 tid = _dat_tim_idx(lvl);
-	return ((u64 *) srcs[tid])[idx];
+	return ((const u64 *) srcs[tid])[idx];
 }
 	
 
@@ -254,6 +256,7 @@ static inline void _itb_blk_stt_set(
 	u64 stt
 )
 {
+	debug("stt set %U : %U.\n", blk_idx, stt);
 	assert(blk_idx < blk_nb);
 	ns_atm(a64, wrt, rel, &tbl[blk_idx][0], stt);
 }
@@ -268,6 +271,7 @@ static inline void _itb_blk_end_set(
 	u64 end
 )
 {
+	debug("end set %U : %U.\n", blk_idx, end);
 	assert(blk_idx < blk_nb);
 	ns_atm(a64, wrt, rel, &tbl[blk_idx][1], end);
 }
@@ -303,19 +307,24 @@ static inline uerr _itb_sch(
 		(tim > _itb_blk_end(tbl, blk_nb, blk_nb - 1))
 	) return 1;
 
+	debug("bsc %U\n", tim);
+
 	/* Bisect based on end time. */
 	u64 min = 0;
-	u64 siz = blk_nb;
-	while (siz > 1) {
+	u64 max = blk_nb;
+	while (min != max) {
+
+		debug("itr %U %U %U.\n", min, max, blk_nb);
 
 		/* Get mid IDX. */
-		const u64 hsiz = siz >> 1;
-		assert(hsiz);
-		const u64 mid = min + hsiz;
+		const u64 mid = min + ((max - min) >> 1);
+
+		debug("  %U [%U, %U].\n", mid, _itb_blk_stt(tbl, blk_nb, mid), _itb_blk_end(tbl, blk_nb, mid));
 
 		/* Bisect iter. */
-		if (tim > _itb_blk_end(tbl, blk_nb, mid)) min = mid;
-		siz = hsiz;
+		if (tim > _itb_blk_end(tbl, blk_nb, mid)) min = mid + 1;
+		else max = mid;
+		assert(min <= max);
 
 	}
 
@@ -361,7 +370,7 @@ static inline tb_stg_blk *_blk_ctr_lod(
 
 	/* Generate the segment initializer. */
 	const uad imp_siz = _ini_blk(idx, blk_nbr);
-	const uad elm_max = _blk_elm_max(idx->lvl);
+	const uad elm_max = _blk_elm_max(idx->sys->tst, idx->lvl);
 	const u8 rgn_nb = _blk_rgn_nb(idx->lvl);
 	const u64 *rgn_sizs = _blk_rgn_sizs(idx->lvl);
 	const u8 arr_nb = _blk_arr_nb(idx->lvl);
@@ -387,6 +396,7 @@ static inline tb_stg_blk *_blk_ctr_lod(
 	/* Allocate. */
 	nh_all__(tb_stg_blk, blk);
 	assert(!ns_map_u64_put(&idx->blks, &blk->blks, blk_nbr));
+	blk->idx = idx;
 	blk->sgm = sgm;
 	blk->syn = syn;
 	blk->uctr = 0;
@@ -418,7 +428,7 @@ static inline tb_stg_blk *_blk_ctr(
 	assert(idx->key, "Index not writeable.\n");
 	
 	/* Determine the next block number. */
-	const u64 itb_max = _idx_elm_max(idx->lvl); 
+	const u64 itb_max = _idx_elm_max(idx->sys->tst, idx->lvl); 
 	assert(itb_max == tb_sgm_elm_max(idx->sgm));
 	const u64 itb_nb = _itb_nb(idx); 
 	assert(itb_nb != itb_max, "index table full.\n");
@@ -495,18 +505,21 @@ static inline u64 _blk_wrt(
 	tb_stg_idx *idx,
 	tb_stg_blk *blk,
 	u64 wrt_nb,
-	void **srcs,
+	const void **srcs,
 	u8 arr_nb
 )
 {
+	assert(idx->key, "not a writeable index.\n");
 	check(arr_nb < 6);
 	check(arr_nb == _blk_arr_nb(idx->lvl));
 
 	/* Cache the timestamp of the last values. */
-	const u64 tim_end = _dat_tim(idx->lvl, srcs, wrt_nb);
+	const u64 tim_end = _dat_tim(idx->lvl, srcs, wrt_nb - 1);
 
 	/* Cache dests. */
 	void *dst[6];
+	uad off = 0;
+	assert(!tb_sgm_wrt_get(blk->sgm, &off));
 	tb_sgm_wrt_loc(blk->sgm, wrt_nb, dst, arr_nb);
 
 	/* Get arrays sizes. */
@@ -514,11 +527,15 @@ static inline u64 _blk_wrt(
 
 	/* Copy, update locations. */
 	for (u8 i = 0; i < arr_nb; i++) {
-		void *src = srcs[i];
+		const void *src = srcs[i];
 		const u64 siz = elm_sizs[i] * wrt_nb;
 		ns_mem_cpy(dst[i], src, siz);
 		srcs[i] = ns_psum(src, siz);
 	}
+
+	/* Report the write. */
+	tb_sgm_wrt_don(blk->sgm, wrt_nb);
+	tb_sgm_wrt_cpl(blk->sgm);
 
 	/* Return the end timestamp. */ 
 	return tim_end;
@@ -648,41 +665,26 @@ static inline void _sys_cln(
 /*
  * Create and initialize the storage directory @pth
  * to contain actual storage data.
- * Return 0 if success, 1 if failure, 2 if already
- * initialized.
+ * Abort on failure.
  */
-uerr tb_stg_ini(
+void tb_stg_ini(
 	const char *pth
 )
 {
+
+	/* Create the directory. */
+	nh_fs_crt_dir(pth);
+
+	/* Create the storage flag. */
+	nh_fs_fcrt_stg(NH_FIL_ATT_RW, "%s/stg", pth);
 
 	/*
 	 * If the directory already exists, check that
 	 * the lock file exists.
 	 */
 	nh_stt stt;
-	if (!nh_fs_tst(NH_FIL_TYP_DIR, 0, &stt, pth)) {
-		if (nh_fs_ftst(NH_FIL_TYP_STM, 0, &stt, "%s/stg", pth)) {
-			debug("Storage flag not present failed.\n");
-			return 1;
-		}
-		return 2;
-	}
-
-	/* Create the directory. */
-	if (nh_fs_crt_dir(pth)) {
-		debug("Directory creation failed.\n");
-		return 1;
-	}
-
-	/* Create the storage flag. */
-	if (nh_fs_fcrt_stg(NH_FIL_ATT_RW, "%s/stg", pth)) {
-		debug("Storage flag creation failed.\n");
-		return 1;
-	}
-
-	/* Complete. */
-	return 0;
+	assert(!nh_fs_tst(NH_FIL_TYP_DIR, 0, &stt, pth));
+	assert(!nh_fs_ftst(NH_FIL_TYP_STM, 0, &stt, "%s/stg", pth));
 
 }
 
@@ -692,10 +694,10 @@ uerr tb_stg_ini(
  * If an error occurs, return 0.
  */ 
 tb_stg_sys *tb_stg_ctr(
-	const char *pth
+	const char *pth,
+	u8 tst
 )
 {
-
 
 	/* Check that the storage layout is valid. */
 	nh_stt stt;
@@ -711,6 +713,25 @@ tb_stg_sys *tb_stg_ctr(
 	ns_map_str_ini(&sys->idxs);
 	sys->itf_nb = 0;
 	sys->ini = nh_all(1024);
+	sys->tst = !!tst;
+	sys->sgm = 0;
+
+	/* Load the syn segment. */
+	if (tst) {
+		sys->sgm = tb_sgm_fopn(
+			1,
+			0,
+			0,
+			1,
+			(u64 []) {4096},
+			0,
+			0,
+			0,
+			"%s/syn", 
+			pth
+		);
+		assert(sys->sgm);
+	}
 
 	/* Complete. */
 	return sys;
@@ -741,6 +762,15 @@ void tb_stg_dtr(
 	nh_fre_(sys);
 }
 
+/*
+ * Return @sys's test sync page.
+ */ 
+void *tb_stg_tst_syn(
+	tb_stg_sys *sys
+)
+{
+	return (sys->sgm) ? tb_sgm_rgn(sys->sgm, 0) : 0;
+}
 
 /*************
  * Index API *
@@ -770,8 +800,8 @@ static inline void _gen_idt(
  * Open and return the index for "@mkp:@ist:@lvl". 
  * If @wrt is set, attempt to open with write privileges,
  * and if success, store the write key (non 0) at @keyp,
- * and return 0; if failure, return 1.
- * Otherwise, return 0 (always succeeds).
+ * and return the index; if failure, return 0.
+ * Otherwise, return the index (always succeeds).
  */
 tb_stg_idx *tb_stg_opn(
 	tb_stg_sys *sys,
@@ -791,7 +821,6 @@ tb_stg_idx *tb_stg_opn(
 	tb_stg_idx *idx = ns_map_sch(&sys->idxs, idt, str, tb_stg_idx, idxs);
 	if (idx) {
 		SAFE_INCR(idx->uctr);
-		SAFE_INCR(sys->itf_nb);
 		goto end;
 	}
 
@@ -809,7 +838,7 @@ tb_stg_idx *tb_stg_opn(
 
 	/* Generate the segment initializer. */
 	uad imp_siz = _ini_idx(sys, mkp, ist, lvl);
-	uad elm_max = _idx_elm_max(lvl);
+	uad elm_max = _idx_elm_max(sys->tst, lvl);
 
 	/* Open the index segment. */
 	tb_sgm *sgm = tb_sgm_fopn(
@@ -840,7 +869,7 @@ tb_stg_idx *tb_stg_opn(
 		idx->sgm,
 		0,
 		0,
-		(void **) &idx->tbl,
+		(const void **) &idx->tbl,
 		1
 	);
 
@@ -848,10 +877,18 @@ tb_stg_idx *tb_stg_opn(
 	 * Reached when we find or allocate an index. */
 	end:;
 
-	/* Attempt to acquire write privileges if required. */
+	/* Track one more use. */	
+	SAFE_INCR(sys->itf_nb);
+
+	/* Attempt to acquire write privileges if required.
+	 * Bail out if failure. */
 	if (wrt) {
 		uad off = 0;
-		assert(!tb_sgm_wrt_get(sgm, &off), "%s/%s/%u/idx : failed to acquire write privileges.\n", mkp, ist, lvl);
+		const uerr err = tb_sgm_wrt_get(sgm, &off);
+		if (err) {
+			tb_stg_cls(idx, 0);
+			return 0;
+		}
 		assert(!idx->key);
 		*key = idx->key = nh_run_tim();
 		assert(idx->key);
@@ -883,8 +920,9 @@ void tb_stg_cls(
 
 	/* Unuse. */
 	SAFE_DECR(idx->uctr);
+	SAFE_DECR(idx->sys->itf_nb);
 	if (!idx->uctr) {
-		assert(idx->key);
+		assert(!idx->key);
 	}
 	
 }
@@ -940,28 +978,28 @@ void tb_stg_val_set(
 }
 
 /*
- * Initialize @dsts with @blk's arrays, set
- * write the time of @blk's first data element at *@timp,
- * write the number of elements of the arrays at *@nbp.
+ * Initialize @dsts with @blk's arrays, set *@sizsp with
+ * the array containing its element sizes, return its
+ * number of elements.
  */
-void tb_sgm_arr(
+u64 tb_sgm_arr_(
 	tb_stg_blk *blk,
-	void **dsts,
+	const void **dsts,
 	u8 dst_nb,
-	u64 *timp,
-	u64 *nbp
+	const u8 **sizsp
 )
 {
-	const u64 nb = *nbp = tb_sgm_arr_nb(blk->sgm);
-	*timp = _blk_stt(blk);
+	const u64 nb = tb_sgm_arr_nb(blk->sgm);
 	assert(dst_nb == _blk_arr_nb(blk->idx->lvl));
-	return tb_sgm_red_rng(
+	*sizsp = _blk_elm_sizs(blk->idx->lvl);
+	tb_sgm_red_rng(
 		blk->sgm, 	
 		0,
 		nb,
 		dsts,
 		dst_nb
 	);
+	return nb;
 }
 
 /*************
@@ -974,6 +1012,8 @@ void tb_sgm_arr(
  *   stored data.
  * - @stt is the time of the firt element. If the storage
  *   is empty, it becomes the time of the first element.
+ * - srcs are updated to the locations of the first
+ *   non-written elements.
  */
 
 /*
@@ -982,15 +1022,17 @@ void tb_sgm_arr(
 void tb_stg_wrt(
 	tb_stg_idx *idx,
 	u64 nb,
-	void **srcs,
+	const void **srcs,
 	u8 arr_nb
 )
 {
 	assert(idx->key, "not a writeable index.\n");
 
 	/* Fetch the index table. */
-	u64 blk_nb = _idx_elm_max(idx->lvl);
-	assert(blk_nb == tb_sgm_elm_max(idx->sgm));
+	const u64 itb_max = _idx_elm_max(idx->sys->tst, idx->lvl);
+	assert(itb_max == tb_sgm_elm_max(idx->sgm));
+	u64 itb_nb = _itb_nb(idx);
+	assert(itb_nb <= itb_max);
 	volatile u64 (*tbl)[2] = idx->tbl;
 
 	/* Determine the last block. */
@@ -1003,6 +1045,7 @@ void tb_stg_wrt(
 
 		/* Get the start time of the data that we will write. */
 		const u64 stt = _dat_tim(idx->lvl, srcs, 0);
+		assert(prv_end < stt);
 		
 		/* Create a block if required. */
 		const u8 crt = (!blk);
@@ -1027,37 +1070,41 @@ void tb_stg_wrt(
 
 		/* Perform the write, update locations, return
 		 * the time of the last element. */
-		u64 end = prv_end = _blk_wrt(
+		const u64 end = prv_end = _blk_wrt(
 			idx,
 			blk,
 			wrt_nb,
 			srcs,
 			arr_nb
 		);
+		assert((stt < end) || ((wrt_nb == 1) && (stt == end)));
 
 		/* If the block was just created, report
 		 * it as existing now that its data is populated. */
 		if (crt) {
 
 			/* Reference a new block in the index table. */
-			_itb_blk_stt_set(tbl, blk_nb + 1, blk_nb, stt);
+			_itb_blk_stt_set(tbl, itb_nb + 1, itb_nb, stt);
 
 			/* Report a new element in the index table. */
 			const uad itb_nxt = tb_sgm_wrt_don(idx->sgm, 1);
-			assert(itb_nxt == blk_nb + 1);
-			blk_nb = itb_nxt; 
-			assert(blk_nb == _itb_nb(idx));
+			assert(itb_nxt == itb_nb + 1);
+			itb_nb = itb_nxt; 
+			assert(itb_nb == _itb_nb(idx));
 
 		}
 
 		/* Report the block's end in the index table. */ 
-		_itb_blk_end_set(tbl, blk_nb, blk_nb - 1, end);
+		_itb_blk_end_set(tbl, itb_nb, itb_nb - 1, end);
+
+		/* Report write. */
+		SAFE_SUB(nb, wrt_nb);
 
 		/* Reiterate. */ 
 		blk = 0;
 	}
 
-	assert(blk_nb == _itb_nb(idx));
+	assert(itb_nb == _itb_nb(idx));
 
 }
 

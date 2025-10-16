@@ -318,7 +318,7 @@ void tb_sgm_red_rng(
 	tb_sgm *sgm,
 	u64 red_stt,
 	u64 red_nb,
-	void **dst,
+	const void **dst,
 	u8 arr_nb
 )
 {
@@ -356,7 +356,7 @@ uerr tb_sgm_wrt_get(
 	if (prv) return 1;
 
 	/* If we got it, initialize the write procedure. */
-	*offp = syn->elm_nb;
+	*offp = ns_atm(a64, red, acq, &syn->elm_nb);
 
 	/* Report success. */
 	return 0;

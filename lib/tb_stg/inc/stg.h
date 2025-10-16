@@ -10,10 +10,9 @@
 /*
  * Create and initialize the storage directory @pth
  * to contain actual storage data.
- * Return 0 if success, 1 if failure, 2 if already
- * initialized.
+ * Abort on failure.
  */
-uerr tb_stg_ini(
+void tb_stg_ini(
 	const char *pth
 );
 
@@ -23,7 +22,8 @@ uerr tb_stg_ini(
  * If an error occurs, return 0.
  */ 
 tb_stg_sys *tb_stg_ctr(
-	const char *pth
+	const char *pth,
+	u8 tst
 );
 
 /*
@@ -31,6 +31,13 @@ tb_stg_sys *tb_stg_ctr(
  * It must have no active data interface.
  */
 void tb_stg_dtr(
+	tb_stg_sys *sys
+);
+
+/*
+ * Return @sys's test sync page.
+ */ 
+void *tb_stg_tst_syn(
 	tb_stg_sys *sys
 );
 
@@ -42,8 +49,8 @@ void tb_stg_dtr(
  * Open and return the index for "@mkp:@ist:@lvl". 
  * If @wrt is set, attempt to open with write privileges,
  * and if success, store the write key (non 0) at @keyp,
- * and return 0; if failure, return 1.
- * Otherwise, return 0 (always succeeds).
+ * and return the index; if failure, return 0.
+ * Otherwise, return the index (always succeeds).
  */
 tb_stg_idx *tb_stg_opn(
 	tb_stg_sys *sys,
@@ -80,11 +87,76 @@ _own_ tb_stg_blk *tb_stg_lod(
 );
 
 /*
+ * Initialize @dsts with @blk's arrays, set *@sizsp with
+ * the array containing its element sizes, return its
+ * number of elements.
+ */
+u64 tb_sgm_arr_(
+	tb_stg_blk *blk,
+	const void **dsts,
+	u8 dst_nb,
+	const u8 **sizsp
+);
+
+/*
+ * Same as above but initialize @dsts and the return
+ * value to point to the elements at time @tim.
+ * @tim must be valid.
+ */ 
+static inline u64 tb_sgm_arr(
+	tb_stg_blk *blk,
+	u64 tim,
+	const void **dsts,
+	u8 dst_nb
+)
+{
+	assert(dst_nb);
+	const u8 *sizs = 0;
+	u64 nb = tb_sgm_arr_(blk, dsts, dst_nb, &sizs);
+	assert(nb);
+	assert(sizs);
+	const u64 *tims = dsts[0];
+	assert(tim <= tims[nb - 1]); /* Wrong block. */
+	for (u64 elm_id = 0; elm_id < nb; elm_id++) {
+		if (tim <= tims[elm_id]) {
+			for (u8 arr_id = 0; arr_id < dst_nb; arr_id++) {
+				dsts[arr_id] += sizs[arr_id] * elm_id;
+			}
+			return nb - elm_id;
+		}
+	}
+
+	/* Element not found. Not possible. */
+	assert(0);
+	return 0;
+	
+}
+
+
+/*
  * Unload @blk.
  */
 void tb_stg_unl(
 	_own_ tb_stg_blk *blk
 );
+
+#define ns_def_stt() for (u8 __ns_def_flg = 1;__ns_def_flg;) 
+#define ns_def_end() for(;__ns_def_flg;__ns_def_flg = 0)
+#define ns_def_(typ, nam, val) for (typ nam = val;__ns_def_flg;) 
+#define ns_def(typ, nam, val) ns_def_stt() ns_def_(typ, nam, val) ns_def_end()
+
+
+/*
+ * Stream values of @idx in [@tim_stt, @tim_end].
+ */
+#define tb_stg_red(idx, tim_stt, tim_end, dsts, dst_nb) \
+	ns_def_stt() \
+	ns_def_(u64, __tim, tim_stt) \
+	ns_def_(u64, __end, tim_end) \
+	ns_def_(const u64 *, __tims, 0) \
+	ns_def_end() \
+	for (tb_stg_blk *__blk; (__tim <= __end) && (__blk = tb_stg_lod(idx, __tim));) \
+	for (u64 __blk_nb = ({u64 __nb = tb_sgm_arr(__blk, __tim, dsts, dst_nb); __tims = dsts[0]; __nb;}), blk_id = 0; __tim = __tims[blk_id], (__tim <= __end) && (blk_id < __blk_nb); blk_id++)
 
 /*
  * If @blk is validated, return 0.
@@ -111,19 +183,6 @@ void tb_stg_val_set(
 );
 
 /*
- * Initialize @dsts with @blk's arrays, set
- * write the time of @blk's first data element at *@timp,
- * write the number of elements of the arrays at *@nbp.
- */
-void tb_sgm_arr(
-	tb_stg_blk *blk,
-	void **dsts,
-	u8 dst_nb,
-	u64 *timp,
-	u64 *nbp
-);
-
-/*
  * Return @blk's second tier data.
  */
 static inline void *tb_sgm_std(
@@ -138,6 +197,8 @@ static inline void *tb_sgm_std(
  * Write functions conform to the following behavior :
  * - they write exactly @nb elements at the end of the
  *   stored data.
+ * - srcs are updated to the locations of the first
+ *   non-written elements.
  */
 
 /*
@@ -147,35 +208,14 @@ static inline void *tb_sgm_std(
 void tb_stg_wrt(
 	tb_stg_idx *idx,
 	u64 nb,
-	void **srcs,
+	const void **srcs,
 	u8 arr_nb
 );
 
 /*
- * Level 0 data write.
- */
-static inline void tb_stg_wrt_lv0(
-	tb_stg_idx *idx,
-	u64 nb,
-	const f64 *avg,
-	const f64 *vol
-)
-{
-	tb_stg_wrt(
-		idx,
-		nb,
-		(void *[]) {
-			(void *) avg,
-			(void *) vol,
-		},
-		2
-	);
-}
-
-/*
  * Level 1 data write.
  */
-static inline void tb_stg_wrt_lv1(
+static inline void tb_stg_wrt_lv0(
 	tb_stg_idx *idx,
 	u64 nb,
 	const u64 *tim,
@@ -188,12 +228,12 @@ static inline void tb_stg_wrt_lv1(
 	tb_stg_wrt(
 		idx,
 		nb,
-		(void *[]) {
-			(void *) tim,
-			(void *) bid,
-			(void *) ask,
-			(void *) avg,
-			(void *) vol,
+		(const void *[]) {
+			(const void *) tim,
+			(const void *) bid,
+			(const void *) ask,
+			(const void *) avg,
+			(const void *) vol,
 		},
 		5
 	);
@@ -202,7 +242,7 @@ static inline void tb_stg_wrt_lv1(
 /*
  * Level 2 data write.
  */
-static inline void tb_stg_wrt_lv2(
+static inline void tb_stg_wrt_lv1(
 	tb_stg_idx *idx,
 	u64 nb,
 	const u64 *tim,
@@ -213,10 +253,10 @@ static inline void tb_stg_wrt_lv2(
 	tb_stg_wrt(
 		idx,
 		nb,
-		(void *[]) {
-			(void *) tim,
-			(void *) prc,
-			(void *) vol,
+		(const void *[]) {
+			(const void *) tim,
+			(const void *) prc,
+			(const void *) vol,
 		},
 		3
 	);
@@ -225,7 +265,7 @@ static inline void tb_stg_wrt_lv2(
 /*
  * Level 3 data write.
  */
-static inline void tb_stg_wrt_lv3(
+static inline void tb_stg_wrt_lv2(
 	tb_stg_idx *idx,
 	u64 nb,
 	const u64 *tim,
@@ -239,13 +279,13 @@ static inline void tb_stg_wrt_lv3(
 	tb_stg_wrt(
 		idx,
 		nb,
-		(void *[]) {
-			(void *) tim,
-			(void *) ord,
-			(void *) trd,
-			(void *) typ,
-			(void *) prc,
-			(void *) vol,
+		(const void *[]) {
+			(const void *) tim,
+			(const void *) ord,
+			(const void *) trd,
+			(const void *) typ,
+			(const void *) prc,
+			(const void *) vol,
 		},
 		6
 	);

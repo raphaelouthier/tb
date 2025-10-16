@@ -67,8 +67,8 @@ struct tb_stg_blk {
 	ns_mapn_u64 blks;
 
 	/* Index. */
-
 	tb_stg_idx *idx;
+
 	/* Segment. */
 	tb_sgm *sgm;
 
@@ -137,6 +137,13 @@ struct tb_stg_sys {
 
 	/* Segments initializer scratch. */
 	void *ini;
+
+	/* Set <=> we are in test scenario and blocks only
+	 * have three elements. */
+	u8 tst;
+
+	/* Storage segment for testing. */
+	tb_sgm *sgm;
 
 };
 
