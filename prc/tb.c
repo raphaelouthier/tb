@@ -102,9 +102,7 @@ static inline u64 *_tim_all(
 		u8 tst_prl_mst = 1; \
 \
 		/* Fork and determine if we're the master. */ \
-		assert(wrk_nb == 1); \
 		for (u8 i = 1; i < wrk_nb; i++) { \
-			assert(0); \
 			pid_t __pid = fork(); \
 			if (__pid == 0) { \
 				tst_prl_mst = 0; \
@@ -682,12 +680,9 @@ static inline void _get_dat(
 	const u8 *elm_sizs
 )
 {
-	debug("idx %U.\n", idx);
-	debug("tim %U.\n", tims[0]);
 	assert(arr_nb);
 	assert(elm_sizs[0] == 8);
 	dst[0] = tims + idx;
-	debug("tim0 %U.\n", ((uint64_t *) dst[0])[0]);
 	
 	for (u8 i = 1; i < arr_nb; i++) {
 		dst[i] = ns_psum(dat, idx * (u64) elm_sizs[i]);
@@ -772,7 +767,6 @@ static void _stg_exc_lvl(
 		if (dsc->wrt) {
 			tb_stg_wrt(idx, stp_elm_nb, srcs, arr_nb);
 		}
-		debug("_tim %U.\n", _tim);
 		wrt_id += stp_elm_nb;
 
 		/* Everyone unloads every 7 steps. */ 

@@ -256,7 +256,6 @@ static inline void _itb_blk_stt_set(
 	u64 stt
 )
 {
-	debug("stt set %U : %U.\n", blk_idx, stt);
 	assert(blk_idx < blk_nb);
 	ns_atm(a64, wrt, rel, &tbl[blk_idx][0], stt);
 }
@@ -271,7 +270,6 @@ static inline void _itb_blk_end_set(
 	u64 end
 )
 {
-	debug("end set %U : %U.\n", blk_idx, end);
 	assert(blk_idx < blk_nb);
 	ns_atm(a64, wrt, rel, &tbl[blk_idx][1], end);
 }
@@ -307,19 +305,13 @@ static inline uerr _itb_sch(
 		(tim > _itb_blk_end(tbl, blk_nb, blk_nb - 1))
 	) return 1;
 
-	debug("bsc %U\n", tim);
-
 	/* Bisect based on end time. */
 	u64 min = 0;
 	u64 max = blk_nb;
 	while (min != max) {
 
-		debug("itr %U %U %U.\n", min, max, blk_nb);
-
 		/* Get mid IDX. */
 		const u64 mid = min + ((max - min) >> 1);
-
-		debug("  %U [%U, %U].\n", mid, _itb_blk_stt(tbl, blk_nb, mid), _itb_blk_end(tbl, blk_nb, mid));
 
 		/* Bisect iter. */
 		if (tim > _itb_blk_end(tbl, blk_nb, mid)) min = mid + 1;
@@ -989,7 +981,8 @@ u64 tb_sgm_arr_(
 	const u8 **sizsp
 )
 {
-	const u64 nb = tb_sgm_arr_nb(blk->sgm);
+	const u64 nb = tb_sgm_elm_nb(blk->sgm);
+	assert(dst_nb == tb_sgm_arr_nb(blk->sgm));
 	assert(dst_nb == _blk_arr_nb(blk->idx->lvl));
 	*sizsp = _blk_elm_sizs(blk->idx->lvl);
 	tb_sgm_red_rng(

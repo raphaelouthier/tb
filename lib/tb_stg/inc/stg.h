@@ -155,8 +155,15 @@ void tb_stg_unl(
 	ns_def_(u64, __end, tim_end) \
 	ns_def_(const u64 *, __tims, 0) \
 	ns_def_end() \
-	for (tb_stg_blk *__blk; (__tim <= __end) && (__blk = tb_stg_lod(idx, __tim));) \
-	for (u64 __blk_nb = ({u64 __nb = tb_sgm_arr(__blk, __tim, dsts, dst_nb); __tims = dsts[0]; __nb;}), blk_id = 0; __tim = __tims[blk_id], (__tim <= __end) && (blk_id < __blk_nb); blk_id++)
+	for ( \
+		tb_stg_blk *__blk = 0; \
+		(({if (__blk) tb_stg_unl(__blk);}),__tim <= __end) && (__blk = tb_stg_lod(idx, __tim)); \
+	) \
+	for ( \
+		u64 __blk_nb = ({u64 __nb = tb_sgm_arr(__blk, __tim, dsts, dst_nb); __tims = dsts[0]; __nb;}), blk_id = 0; \
+	   __tim = __tims[blk_id], (__tim <= __end) && (blk_id < __blk_nb); \
+	   blk_id++ \
+	)
 
 /*
  * If @blk is validated, return 0.
