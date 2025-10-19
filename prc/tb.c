@@ -816,7 +816,6 @@ static void _stg_exc_lvl(
 
 		/* Everyone checks that they can access each block,
 		 * and that the block's data is the expected one. */
-		/* TODO */
 
 		assert(!tb_stg_lod(idx, tim_stt - 1));
 		assert(!tb_stg_lod(idx, tim_end + 1));

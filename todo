@@ -1,5 +1,3 @@
-TODO disable nh logging in some way (flag in commands ?).
-
 TODO when orderbook reconstruction lib is done, determine
 the number of price ticks to contains in the per-tb_stg_blk
 orderbook snapshot.
