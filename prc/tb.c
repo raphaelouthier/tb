@@ -1,6 +1,6 @@
 /* Copyright 2024 Raphael Outhier - confidential - proprietary - no copy - no diffusion. */
 
-#include <tb_stg/tb_stg.all.h>
+#include <tb_cor/tb_cor.all.h>
 
 #include <stdlib.h>
 #include <unistd.h>

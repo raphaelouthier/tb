@@ -1,3 +1,12 @@
 TODO when orderbook reconstruction lib is done, determine
 the number of price ticks to contains in the per-tb_stg_blk
 orderbook snapshot.
+
+TODO we must support order data with constant time
+	-> itb is OK but search must be updated :
+		-> to search between [stt, end] :
+           - start at stt - 1
+		   - increment until stt is reached.
+		   - iterate while end + 1 is reached or end.
+    - update testbench to have every other time be equal
+      to the other.
