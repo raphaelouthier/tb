@@ -1,3 +1,13 @@
+# Conventions.
+
+## Bid volume, ask volume.
+
+Bid volume is negative.
+Ask volume is positive.
+
+Mnemonic is that the bid/ask volumes comparison matches
+their normal price comparisons : bid-price is lower to ask price.
+
 # Historical data types.
 
 ## Level 0

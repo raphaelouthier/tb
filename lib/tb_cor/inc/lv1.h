@@ -101,6 +101,9 @@ struct tb_lv1_prc {
 	/* The volume before any volume update. */
 	f64 vol_stt;
 
+	/* The volume at the current time. */
+	f64 vol_cur;
+
 	/* Time of most recent update. */
 	u64 tim_end;
 
@@ -114,14 +117,12 @@ struct tb_lv1_hst {
 	/* Active price levels. */
 	ns_map_u64 prcs;
 
-	/* Time reference. */
-	u64 tim_ref;
+	/*
+	 * Dimensions.
+	 */
 
-	/* Current time. */
-	u64 tim_cur;
-
-	/* Time of the most recent order. */
-	u64 tim_max;
+	/* Time anchor. */
+	u64 tim_anc;
 
 	/* Heatmap number of columns. */
 	u64 hmp_tim_nb;
@@ -129,25 +130,55 @@ struct tb_lv1_hst {
 	/* Heatmap number of columns. */
 	u64 hmp_prc_nb;
 
-	/* Heatmap time (X) cell width. */ 
-	u64 tim_wid;
+	/* Heatmap time (x) cell width is the time anchor. */
 
 	/* Heatmap price (Y) cell width is 1. */
 
-	/* Heatmap time span (= tim_nb * tim_wid). */ 
-	u64 tim_spn;
-
 	/* Number of elements of the bid / ask curves.
 	 * 0 : not supported. */
-	u64 bac_siz;
+	u64 bac_nb;
 
-	/* Heatmap. */
+	/* Heatmap time span (= (tim_nb + 1) * tim_wid). */ 
+	u64 hmp_tim_spn;
+
+	/* Bid / ask curves time span. */
+	u64 bac_tim_spn;
+
+	/*
+	 * Times.
+	 */
+
+	/* Current time. */
+	u64 tim_cur;
+
+	/* Time below which an order belongs to the heatmap.
+	 * = tim_cur aligned up to time anchor. */
+	u64 tim_hmp;
+
+	/* Time of (==) the most recent order. */
+	u64 tim_max;
+
+	/* Time until which (<) orders can be added. */
+	u64 tim_end;
+
+	/*
+	 * Re-anchoring.
+	 */
+
+	/* Number of new columns in the heatmap at next gen. */
+	u64 rnc_nb_tim;
+
+	/*
+	 * Arrays.
+	 */
+
+	/* Heatmap. [hmp_tim_nb][hmp_prc_nb]. */
 	f64 *hmp;
 
-	/* Bid curve if supported. */
+	/* Bid curve if supported. [bac_nb] */
 	f64 *bid;
 
-	/* Ask curve if supported. */
+	/* Ask curve if supported. [bac_nb]*/
 	f64 *ask;
 
 };
@@ -162,10 +193,10 @@ struct tb_lv1_hst {
  * If @bac is set, generate the bid-ask curve.
  */
 tb_lv1_hst *tb_lv1_ctr(
-	u64 hst_tim_nb,
-	u64 hst_prc_nb,
-	u64 hst_tim_wid,
-	u64 bac_siz
+	u64 hmp_tim_nb,
+	u64 hmp_prc_nb,
+	u64 hmp_tim_wid,
+	u64 bac_nb
 );
 
 /*
@@ -175,38 +206,44 @@ void tb_lv1_dtr(
 	tb_lv1_hst *hst
 );
 
-#error talk with Julia about :
-- the NN output data : 
-  - is it price, is it bid/ask spread ?
-  	-> max bid min ask is easy to maintain but since we aggregate
-	   they may overlap -> (bid + ask) / 2 may be a good training option.
-- the output verification data :
-  - confirm that bid/ask or derived is OK.
-  - confirm how to compute it.
-Once it's done, do the necessary APIs to generate it efficiently.
+/*
+ * Update the current time to @tim_cur,
+ * update the bid-ask curves to reflect it.
+ * Do not update price levels nor the bitmap.
+ * Allows adding orders up to (<)
+ * @tim_cur + @hst->bad_tim_spn.
+ */
+void tb_lv1_prp(
+	tb_lv1_hst *hst,
+	u64 tim_cur
+);
 
 /*
- * Add volume updates to @hst.
+ * Add @upd_nb volume updates to @hst.
  * If @tims is null, volumes are considered to be
  * start volumes only and are not registered as updates,
- * but all price levels must be new. 
+ * and in this case, all price levels must be new. 
  * If any, all created price updates are added in the
  * pre list if they are below (<=) the current time and
  * in the post list otherwise.
+ * If bid/ask curves are supported, all times must be
+ * in their (shared) range.
+ * Otherwise, all times must be below (<=) the current
+ * time.
  */
 void tb_lv1_add(
 	tb_lv1_hst *hst,
+	u64 upd_nb,
 	u64 *tims,
 	f64 *prcs,
 	f64 *vols
 );
 
 /*
- * Update the current time to @tim_cur,
- * update all price levels, update the heatmap.
- * If supported, update the bid/ask curves.
+ * Process newly added updates, update all price levels,
+ * update the heatmap.
  */ 
-void tb_lv1_gen(
+void tb_lv1_prc(
 	tb_lv1_hst *hst,
 	u64 tim_cur
 );
