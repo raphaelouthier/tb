@@ -8,21 +8,21 @@
  * - fast incorporation and storage of burst of level 1
  *   events read from storage.
  * - determination of a current time.
- * - efficient generation and update of a time x price-level
+ * - efficient generation and update of a time x tick-level
  *   indexed heatmap of events prior to the current time.
  * - efficient generation and update of two time-indexed
- *   bid-ask price curves following the current time.
+ *   bid-ask tick curves following the current time.
  *
  * The heatmap has the following characteristics :
  * - 0 : fixed size : the image generated has a fixed
  *   height and width, and as a consequence, only represents
- *   a fraction of time x price of the orderbook.
+ *   a fraction of time x tick of the orderbook.
  * - 1 : fixed time grid : each pixel column occupies a time
  *   range in the form of [start + K * delta, start + (K + 1) * delta[,
  *   K being an integer, and start and delta being two construction-time
  *   constants.
- * - 2 : non-price-gathering : each pixel row represents a
- *   single price level. No aggregation is made accross price
+ * - 2 : non-tick-gathering : each pixel row represents a
+ *   single tick level. No aggregation is made accross tick
  *   levels.
  * - 3 : synchronous re-anchoring : the heatmap must
  *   represent a relevant orderbook fraction. Consequence
@@ -35,12 +35,12 @@
  *   reusing the previous image generations which greatly
  *   increases the processing time.
  *   The current choice is to re-anchor the time and
- *   price-levels differences synchronously to maximize
+ *   tick-levels differences synchronously to maximize
  *   the reuse of previously generated data.
- *   It relies on the assumption that the reference price
+ *   It relies on the assumption that the reference tick
  *   does not vary significantly in a single delta.
  *
- * The bid-ask price curves have the following characteristics :
+ * The bid-ask tick curves have the following characteristics :
  * - time-indexed, with same delta as heatmap.
  * - fixed size : the curves are mono-dimensional
  *   arrays with a fixed number of elements.
@@ -60,7 +60,7 @@
 
 types(
 	tb_lv1_upd,
-	tb_lv1_prc,
+	tb_lv1_tck,
 	tb_lv1_hst
 );
 
@@ -69,12 +69,18 @@ types(
  ***********/
 
 /*
- * Volume update in the historical data structure.
+ * Volume update in the history.
  */
 struct tb_lv1_upd {
 
-	/* Updates of the same sequence indexed by time. */
-	ns_dls upds;
+	/* Updates past the current time of @tck indexed by time. */
+	ns_dls upds_tck;
+
+	/* Updates of the same history indexed by increasing time. */
+	ns_sls upds_hst;
+
+	/* Tick. */
+	tb_lv1_tck *tck;
 
 	/* Volume. */
 	f64 vol;
@@ -87,16 +93,13 @@ struct tb_lv1_upd {
 /*
  * A price tick in the level 1 heatmap.
  */
-struct tb_lv1_prc {
+struct tb_lv1_tck {
 
-	/* Non-empty price ticks of the same history. */
-	ns_mapn_f64 prcs;
+	/* Non-empty ticks of the same history ordered by level. */
+	ns_mapn_u64 tcks;
 
 	/* Volume updates prior to (<=) the current time, sorted by time. */
-	ns_dls upds_pre;
-
-	/* Volume updates following (>) the current time, sorted by time. */ 
-	ns_dls upds_pst;
+	ns_dls upds_tck;
 
 	/* The volume before any volume update. */
 	f64 vol_stt;
@@ -104,8 +107,11 @@ struct tb_lv1_prc {
 	/* The volume at the current time. */
 	f64 vol_cur;
 
-	/* Time of most recent update. */
-	u64 tim_end;
+	/* The volume at the maximal time. */
+	f64 vol_max;
+
+	/* Time of most recent volume update. */
+	u64 tim_max;
 
 };
 
@@ -113,26 +119,32 @@ struct tb_lv1_prc {
  * Level 1 history.
  */
 struct tb_lv1_hst {
+	
+	/* Active price ticks. */
+	ns_map_u64 tcks;
 
-	/* Active price levels. */
-	ns_map_u64 prcs;
+	/* Updates sorted by time. */
+	ns_slsh upds_hst;
+
+	/* Next update to process. */
+	tb_lv1_upd *upd_prc;
 
 	/*
 	 * Dimensions.
 	 */
 
-	/* Time anchor. */
-	u64 tim_anc;
+	/* Time resolution. Used as time cell width and anchor. */
+	u64 tim_res;
 
 	/* Heatmap number of columns. */
-	u64 hmp_tim_nb;
+	u64 hmp_dim_tim;
 
-	/* Heatmap number of columns. */
-	u64 hmp_prc_nb;
+	/* Heatmap number of columns. Must be even. */
+	u64 hmp_dim_tck;
 
 	/* Heatmap time (x) cell width is the time anchor. */
 
-	/* Heatmap price (Y) cell width is 1. */
+	/* Heatmap tick (Y) cell width is 1. */
 
 	/* Number of elements of the bid / ask curves.
 	 * 0 : not supported. */
@@ -162,17 +174,35 @@ struct tb_lv1_hst {
 	u64 tim_end;
 
 	/*
+	 * Ticks.
+	 */
+
+	/* Best (>) bid. */
+	tb_lv1_tck *tck_bid;
+
+	/* Best (<) ask. */
+	tb_lv1_tck *tck_ask;
+
+	/* Current heatmap tick reference. */
+	u64 tck_ref;
+
+	/* Current heatmap tick range [min, max[. */
+	u64 hmp_tck_min;
+	u64 hmp_tck_max;
+
+
+	/*
 	 * Re-anchoring.
 	 */
 
 	/* Number of new columns in the heatmap at next gen. */
-	u64 rnc_nb_tim;
+	u64 hmp_shf_tim;
 
 	/*
 	 * Arrays.
 	 */
 
-	/* Heatmap. [hmp_tim_nb][hmp_prc_nb]. */
+	/* Heatmap. [hmp_dim_tim][hmp_dim_tck]. */
 	f64 *hmp;
 
 	/* Bid curve if supported. [bac_nb] */
@@ -193,8 +223,8 @@ struct tb_lv1_hst {
  * If @bac is set, generate the bid-ask curve.
  */
 tb_lv1_hst *tb_lv1_ctr(
-	u64 hmp_tim_nb,
-	u64 hmp_prc_nb,
+	u64 hmp_dim_tim,
+	u64 hmp_dim_tck,
 	u64 hmp_tim_wid,
 	u64 bac_nb
 );
@@ -209,7 +239,7 @@ void tb_lv1_dtr(
 /*
  * Update the current time to @tim_cur,
  * update the bid-ask curves to reflect it.
- * Do not update price levels nor the bitmap.
+ * Do not update tick levels nor the bitmap.
  * Allows adding orders up to (<)
  * @tim_cur + @hst->bad_tim_spn.
  */
@@ -222,8 +252,8 @@ void tb_lv1_prp(
  * Add @upd_nb volume updates to @hst.
  * If @tims is null, volumes are considered to be
  * start volumes only and are not registered as updates,
- * and in this case, all price levels must be new. 
- * If any, all created price updates are added in the
+ * and in this case, all tick levels must be new. 
+ * If any, all created updates are added in the
  * pre list if they are below (<=) the current time and
  * in the post list otherwise.
  * If bid/ask curves are supported, all times must be
@@ -240,7 +270,7 @@ void tb_lv1_add(
 );
 
 /*
- * Process newly added updates, update all price levels,
+ * Process newly added updates, update all tick levels,
  * update the heatmap.
  */ 
 void tb_lv1_prc(
@@ -249,7 +279,7 @@ void tb_lv1_prc(
 );
 
 /*
- * Delete all price updates that are too old to appear
+ * Delete all updates that are too old to appear
  * in the heatmap anymore.
  */
 void tb_lv1_cln(
