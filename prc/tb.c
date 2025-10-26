@@ -763,7 +763,6 @@ static void _stg_exc_lvl(
 		 * range. */
 		_get_dat(srcs, tims, dsc->dat, arr_nb, wrt_id, _elm_sizs);
 		tim_end = ((uint64_t *) srcs[0])[stp_elm_nb - 1];
-		u64 _tim = ((uint64_t *) srcs[0])[0];
 		if (dsc->wrt) {
 			tb_stg_wrt(idx, stp_elm_nb, srcs, arr_nb);
 		}

@@ -287,6 +287,7 @@ static inline void _hst_bac_mov(
 )
 {
 	assert(shf);
+	assert(hst->bac_nb);
 
 	/* If no bid / ask curve, nothing to do. */
 	const u64 len = hst->bac_nb; 
@@ -321,19 +322,57 @@ static inline void _hst_bac_mov(
 /*
  * Move the heatmap.
  * Caused by a re-anchor during generation.
- * @shf_tck > 0 -> move data up.
-#error TODO FILL WITH NANs IF IN DEBUG MODE.
-#error TODO CHECK THAT shf_tck orientation is the right one.
+ * @shf_tck > 0 -> move data down.
  */
 static inline void _hst_hmp_mov(
 	tb_lv1_hst *hst,
 	u64 shf_tim,
 	s64 shf_tck
-);
+)
+{
+	assert(shf_tim);
+
+	/* If shift of more than the dimensions,
+	 * no data should be reused. */ 
+	const u8 mov_dwn = (shf_tck >= 0);
+	const u64 dim_tim = hst->hmp_dim_tim;
+	const u64 dim_tck = hst->hmp_dim_tck;
+	const u64 shf_abs = mov_dwn ? (u64) shf_tck : (u64) -shf_tck;
+	if (
+		(shf_tim >= dim_tim) ||
+		(shf_abs >= dim_tck)
+	) {
+		/* In debug mode, fill with NANs.
+		 * Otherwise, just keep as is. */
+		#ifdef DEBUG
+		ns_mem_set(hst->hmp, 0xff, dim_tim * dim_tck * sizeof(f64));
+		#endif
+		return;
+	}
+
+	#if 0
+	/* Bruteforce. Should only be used for debug. */
+	const u64 cpy_off = shf_tim * dim_tck + shf_tck;
+	ns_mem_cpy(hst->hmp + cpy_off, hst->hmp, dim_tim * dim_tck * sizeof(f64) - cpy_off);
+
+	#else
+	/* More fine-grained copy : iterate over
+	 * each column and copy just what is needed in this column. */
+	f64 *dst = hst->hmp + (mov_dwn ? 0 : -shf_tck);
+	f64 *src = hst->hmp + shf_tim * dim_tck + (mov_dwn ? shf_tck : 0);
+	const u64 len = sizeof(f64) * (dim_tck - shf_abs);
+	for (u64 col_id = 0; col_id < dim_tim - shf_tim; col_id++) {
+		ns_mem_cpy(dst, src, len);
+		dst += dim_tck;
+		src += dim_tck;
+	}
+	#endif
+
+}
 
 /*
  * Write the @wrt_nb first cells of the hashmap row
- * at index @tck_id of @hst.
+ * at index @row_id of @hst.
  * If @tck is non-null, it contains the volume updates
  * that should be used to compute cell values.
  * Otherwise, we have no volume data, and cells must
@@ -341,10 +380,141 @@ static inline void _hst_hmp_mov(
  */
 static inline void _hmp_wrt_row(
 	tb_lv1_hst *hst,
-	u64 tck_id,
+	u64 row_id,
 	u64 wrt_nb,
 	tb_lv1_tck *tck
-);
+)
+{
+
+	/*
+	 * Utils.
+	 */
+
+	/* Get heatmap location. */
+	#define HMP_LOC(col, row) hmp[(col) * dim_tck + (row)]
+
+	/* Get the next update. */
+	#define _upd_nxt(upd) ({ \
+		ns_dls *__nxt = upd->upds_tck.next; \
+		(__nxt == &tck->upds_tck) ? 0 : ns_cnt_of(__nxt, tb_lv1_upd, upds_tck); \
+	})
+
+	/* Get the previous update. */
+	#define _upd_prv(upd) ({ \
+		ns_dls *__prv = upd->upds_tck.prev; \
+		(__prv == &tck->upds_tck) ? 0 : ns_cnt_of(__prv, tb_lv1_upd, upds_tck); \
+	})
+
+	/* Cache hashmap. */
+	f64 *hmp = hst->hmp;
+	const u64 dim_tck = hst->hmp_dim_tck;
+
+	/* Verify the current tick. */
+
+	/* Read the current volume.
+	 * If data, check that the last update matches
+	 * the current volume. */
+	f64 vol_cur = 0;
+	f64 vol_stt = 0;
+	tb_lv1_upd *upd = 0;
+	if (tck) {
+		vol_stt = tck->vol_stt;
+		vol_cur = tck->vol_cur;
+		if (ns_dls_emptype(&tck->upds_tck, upd, tb_lv1_upd, upds_tck)) {
+			upd = 0;	
+			assert(vol_cur == vol_stt);
+		} else {
+			assert(vol_cur == upd->vol);
+		}
+	}
+
+	/* If no data, just write the current volume. */
+	if (!upd) {
+		for (u64 col_id = hst->hmp_dim_tim; (col_id--), wrt_nb--;) {
+			HMP_LOC(col_id, row_id) = vol_cur;	
+		}
+		return;
+	}
+
+	/* Write all cell. */
+	const u64 tim_res = hst->tim_res;
+	check(!(hst->tim_hmp % tim_res)); 
+	check(!(hst->hmp_tim_spn % tim_res)); 
+	const u64 aid_hmp = (hst->tim_hmp - hst->hmp_tim_spn) / tim_res;  
+	u64 aid_upd = upd->tim / tim_res;
+	for (u64 col_id = hst->hmp_dim_tim; (col_id--), wrt_nb--;) {
+		check((upd) || (vol_stt == vol_cur));
+
+		/* If no update anymore, just write the start volume. */
+		if (!upd) {
+			HMP_LOC(col_id, row_id) = vol_stt;	
+			continue;
+		}
+
+		/* The previous update should be in or before
+		 * this cell.
+		 * The next update should be after this cell. */
+		const u64 aid_col = aid_hmp + col_id;
+		check(aid_upd <= aid_col);
+		#ifdef DEBUG
+		tb_lv1_upd *nxt = _upd_nxt(upd);
+		check((!nxt) || ((upd->tim / tim_res) > aid_col));
+		#endif
+
+		/* If the previous update is before this cell,
+		 * just write the current volume. */
+		if (aid_upd < aid_col) {
+			HMP_LOC(col_id, row_id) = vol_cur;	
+			continue;
+		}
+
+		/* Iterate over all updates in this cell and
+		 * determine a compound volume. */
+		u64 cel_tim = tim_res * aid_col;
+		u64 upd_end = tim_res * (aid_col + 1); 
+		f64 wgt_sum = 0;
+		u64 tim_ttl = 0;
+		while (1) {
+			check((upd) || (vol_stt == vol_cur));
+
+			/* Compute the current calculation attrs.
+			 * If no more updates, use the current volume
+			 * for the rest of the time.
+			 * If an update exists, use its volume until
+			 * its start or the start of the cell. */
+			u64 upd_stt = 0;
+			f64 upd_vol = vol_cur;
+			if (upd) {
+				upd_stt = upd->tim; 
+				upd_vol = upd->vol;
+			}
+			check(upd_stt <= upd_end);
+			if (upd_stt < cel_tim) upd_stt = cel_tim; 
+
+			/* Incorporate into the average. */
+			u64 upd_tim = upd_end - upd_stt;
+			wgt_sum += (upd_vol * (f64) upd_tim);
+			SAFE_ADD(tim_ttl, upd_tim); 
+
+			/* If no more update, stop. */
+			if (!upd) break;
+
+			/* Fetch the previous update. */
+			upd = _upd_prv(upd);
+
+			/* Update the current volume. */
+			vol_cur = (upd) ? upd->vol : vol_stt;
+
+		}
+		check(tim_ttl == tim_res);
+
+		/* Compute the average. */
+		const f64 vol_avg = wgt_sum / (f64) tim_ttl;
+		HMP_LOC(col_id, row_id) = vol_avg;	
+
+	}
+
+}
 
 /******************
  * Tick internals *
@@ -814,20 +984,20 @@ void tb_lv1_prc(
 	if (hst->hmp_shf_tim) {
 
 		/* Determine the new reference price. */
-		const u64 tck_cur = hst->tck_ref;
-		const u64 tck_new = _tck_ref_cpt(hst);
-		check(tck_cur >= (hst->hmp_dim_tck >> 1));
-		check(tck_new >= (hst->hmp_dim_tck >> 1));
+		const u64 tck_ref_cur = hst->tck_ref;
+		const u64 tck_ref_new = _tck_ref_cpt(hst);
+		check(tck_ref_cur >= (hst->hmp_dim_tck >> 1));
+		check(tck_ref_new >= (hst->hmp_dim_tck >> 1));
 
 		/* Move heatmap data. */
-		const s64 hmp_shf_tck = (s64) tck_new - (s64) tck_cur;
+		const s64 hmp_shf_tck = (s64) tck_ref_new - (s64) tck_ref_cur;
 		_hst_hmp_mov(hst, hst->hmp_shf_tim, hmp_shf_tck);
 
 		/* Update references and current heatmap range. */
-		hst->tck_ref = tck_new; 
+		hst->tck_ref = tck_ref_new; 
 		hst->hmp_shf_tim = 0;
-		hst->hmp_tck_min = hmp_tck_cur_min = tck_new - hmp_tck_hln;
-		hst->hmp_tck_max = hmp_tck_cur_max = tck_new - hmp_tck_hln;
+		hst->hmp_tck_min = hmp_tck_cur_min = tck_ref_new - hmp_tck_hln;
+		hst->hmp_tck_max = hmp_tck_cur_max = tck_ref_new - hmp_tck_hln;
 
 	}
 
@@ -835,8 +1005,8 @@ void tb_lv1_prc(
 	tb_lv1_tck *tck = ns_map_sch_gs(&hst->tcks, hmp_tck_cur_min, u64, tb_lv1_tck, tcks); 
 	check(hmp_tck_cur_max - hmp_tck_cur_min == hst->hmp_dim_tck);
 	const u64 hmp_dim_tim = hst->hmp_dim_tim;
-	for (u64 tck_id = hst->hmp_dim_tck; tck_id--;) {
-		const u64 tck_val = hmp_tck_cur_min + tck_id;
+	for (u64 row_id = hst->hmp_dim_tck; row_id--;) {
+		const u64 tck_val = hmp_tck_cur_min + row_id;
 		check(tck_val < hmp_tck_cur_max);
 		check((!tck) || tck->tcks.val <= tck_val); 
 
@@ -848,7 +1018,7 @@ void tb_lv1_prc(
 		const u8 has_dat = tck && (tck->tcks.val == tck_val);
 
 		/* Fill heatmap cells. */
-		_hmp_wrt_row(hst, tck_id, wrt_nbr, has_dat ? tck : 0); 
+		_hmp_wrt_row(hst, row_id, wrt_nbr, has_dat ? tck : 0); 
 
 		/* If current price used, fetch the previous one. */
 		if (has_dat) {

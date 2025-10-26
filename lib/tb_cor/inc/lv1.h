@@ -236,7 +236,7 @@ struct tb_lv1_hst {
 	 * Arrays.
 	 */
 
-	/* Heatmap. [hmp_dim_tim][hmp_dim_tck]. */
+	/* Heatmap. [hmp_dim_tck][hmp_dim_tim]. */
 	f64 *hmp;
 
 	/* Bid curve if supported. [bac_nb] */
