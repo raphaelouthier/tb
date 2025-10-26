@@ -156,6 +156,9 @@ struct tb_lv1_hst {
 	/* Bid / ask curves time span. */
 	u64 bac_tim_spn;
 
+	/* Price to tick coeff. */
+	f64 prc_cff;
+
 	/*
 	 * Times.
 	 */
@@ -178,10 +181,10 @@ struct tb_lv1_hst {
 	 */
 
 	/* Best (>) bid. */
-	tb_lv1_tck *tck_bid;
+	tb_lv1_tck *bst_bid;
 
 	/* Best (<) ask. */
-	tb_lv1_tck *tck_ask;
+	tb_lv1_tck *bst_ask;
 
 	/* Current heatmap tick reference. */
 	u64 tck_ref;
@@ -223,7 +226,8 @@ struct tb_lv1_hst {
  * If @bac is set, generate the bid-ask curve.
  */
 tb_lv1_hst *tb_lv1_ctr(
-	u64 hmp_dim_tim,
+	u64 tim_res,
+	f64 prc_res,
 	u64 hmp_dim_tck,
 	u64 hmp_tim_wid,
 	u64 bac_nb
@@ -274,8 +278,7 @@ void tb_lv1_add(
  * update the heatmap.
  */ 
 void tb_lv1_prc(
-	tb_lv1_hst *hst,
-	u64 tim_cur
+	tb_lv1_hst *hst
 );
 
 /*
@@ -289,7 +292,7 @@ void tb_lv1_cln(
 /*
  * Return @hst's heatmap.
  */
-static inline tb_lv1_hmp(
+static inline f64 *tb_lv1_hmp(
 	tb_lv1_hst *hst
 ) {return hst->hmp;}
 
@@ -297,7 +300,7 @@ static inline tb_lv1_hmp(
  * If @hst supports it, return its bid curve.
  * If not return 0.
  */
-static inline tb_lv1_bid(
+static inline f64 *tb_lv1_bid(
 	tb_lv1_hst *hst
 ) {return hst->bid;}
 
@@ -305,7 +308,7 @@ static inline tb_lv1_bid(
  * If @hst supports it, return its ask curve.
  * If not return 0.
  */
-static inline tb_lv1_ask(
+static inline f64 *tb_lv1_ask(
 	tb_lv1_hst *hst
 ) {return hst->ask;}
 
