@@ -49,6 +49,19 @@
  * - monotonic read : events can only be read in the
  *   increasing time direction, so that past indexed data
  *   is never updated.
+ *
+ * The heatmap and bid-ask curves are time-indexed.
+ * Though, since they :
+ * - group times in a cell of the width of
+ *   1x the time resolution; and
+ * - are re-anchored every time the current time increases
+ *   enough
+ * it is convenient to index their cells on a metric
+ * derived from the time, the absolute index (aid), 
+ * computed from the time and time resolution by :
+ * aid = (u64) ((u64) time / (u64) resolution).
+ * A reanchoring always does a shift of an integer > 0
+ * number of aids.
  */
 
 #ifndef TB_COR_LV1_H
@@ -180,11 +193,11 @@ struct tb_lv1_hst {
 	 * Ticks.
 	 */
 
-	/* Best (>) bid. */
-	tb_lv1_tck *bst_bid;
+	/* Best (>) bid at current time. */
+	tb_lv1_tck *bst_cur_bid;
 
-	/* Best (<) ask. */
-	tb_lv1_tck *bst_ask;
+	/* Best (<) ask at current time. */
+	tb_lv1_tck *bst_cur_ask;
 
 	/* Current heatmap tick reference. */
 	u64 tck_ref;
@@ -193,6 +206,24 @@ struct tb_lv1_hst {
 	u64 hmp_tck_min;
 	u64 hmp_tck_max;
 
+	/*
+	 * Bid-ask curve metadata.
+	 */
+
+	/* Best (>) bid at max time. */
+	tb_lv1_tck *bst_max_bid;
+
+	/* Best (<) ask at max time. */
+	tb_lv1_tck *bst_max_ask;
+
+	/* Bid-ask curve start AID. */
+	u64 bac_aid;
+
+	/* AID of last best bid. */
+	u64 bid_aid;
+
+	/* AID of last best ask. */
+	u64 ask_aid;
 
 	/*
 	 * Re-anchoring.
@@ -209,10 +240,10 @@ struct tb_lv1_hst {
 	f64 *hmp;
 
 	/* Bid curve if supported. [bac_nb] */
-	f64 *bid;
+	u64 *bid_crv;
 
 	/* Ask curve if supported. [bac_nb]*/
-	f64 *ask;
+	u64 *ask_crv;
 
 };
 
@@ -300,16 +331,16 @@ static inline f64 *tb_lv1_hmp(
  * If @hst supports it, return its bid curve.
  * If not return 0.
  */
-static inline f64 *tb_lv1_bid(
+static inline u64 *tb_lv1_bid(
 	tb_lv1_hst *hst
-) {return hst->bid;}
+) {return hst->bid_crv;}
 
 /*
  * If @hst supports it, return its ask curve.
  * If not return 0.
  */
-static inline f64 *tb_lv1_ask(
+static inline u64 *tb_lv1_ask(
 	tb_lv1_hst *hst
-) {return hst->ask;}
+) {return hst->ask_crv;}
 
 #endif /* TB_COR_LV1_H */

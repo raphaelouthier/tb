@@ -56,103 +56,220 @@ static inline u64 _to_hmp_end_tim(
  ********************/
 
 /*
+ * Generate the code to update the best bid/ask spread
+ * at a specified time.
+ */
+#define BAS_UPD(vol_nam, bst_bid_nam, bst_ask_nam) \
+	/* Read the volume at the specified time. */ \
+	const f64 vol = tck->vol_nam; \
+	tb_lv1_tck *const prv_bst_bid = hst->bst_bid_nam; \
+	tb_lv1_tck *const prv_bst_ask = hst->bst_ask_nam; \
+	_unused_ u8 bid_upd = 0; \
+	_unused_ u8 ask_upd = 0; \
+\
+	/* If @tck's volume is null, complex case. */ \
+	if (vol == 0) { \
+\
+		/* Determine if @tck is the best bid or ask \
+		 * at the specified time. */ \
+		check((prv_bst_bid != prv_bst_ask) || (prv_bst_bid == 0)); \
+\
+		/* If best bid, search for the first lower price 
+		 * level with a non-null volume. */  \
+		if (tck == prv_bst_bid) { \
+			bid_upd = 1; \
+			while (1) { \
+				ns_mapn_u64 *prv = ns_map_u64_fn_inr(&tck->tcks); \
+				if (!prv) { \
+					hst->bst_bid_nam = 0; \
+					break; \
+				} \
+				tck = ns_cnt_of(prv, tb_lv1_tck, tcks); \
+				if (tck->vol_nam > 0) { \
+					debug("warning : found an ask price below the previous best bid price.\n"); \
+				} \
+				if (tck->vol_nam < 0) { \
+					hst->bst_bid_nam = tck; \
+					break; \
+				} \
+			} \
+		} \
+\
+		/* If best ask, search for the first upper price 
+		 * level with a non-null volume. */  \
+		else if (tck == prv_bst_ask) { \
+			ask_upd = 1; \
+			while (1) { \
+				ns_mapn_u64 *nxt = ns_map_u64_fn_in(&tck->tcks); \
+				if (!nxt) { \
+					hst->bst_ask_nam = 0; \
+					break; \
+				} \
+				tck = ns_cnt_of(nxt, tb_lv1_tck, tcks); \
+				if (tck->vol_nam < 0) { \
+					debug("warning : found a bid price above the previous best ask price.\n"); \
+				} \
+				if (tck->vol_nam > 0) { \
+					hst->bst_ask_nam = tck; \
+					break; \
+				} \
+			} \
+		} \
+\
+		check((hst->bst_bid_nam != hst->bst_ask_nam) || (hst->bst_bid_nam == 0)); \
+\
+	} \
+\
+	/* If not a null volume, just select as new best bid \
+	 * or ask if relevant. */ \
+	else { \
+\
+		/* Determine if bid or ask, read the tick. */ \
+		const u8 is_ask = _is_ask(vol); \
+		const u64 tck_val = tck->tcks.val; \
+\
+		/* If bid, if price is superior to best 
+		 * bid, select as best bid. */ \
+		if (!is_ask) { \
+			if ((!prv_bst_bid) || (prv_bst_bid->tcks.val < tck_val)) { \
+				bid_upd = 1; \
+				hst->bst_bid_nam = tck; \
+			} \
+		} \
+\
+		/* If ask, if price is inferior to best 
+		 * ask, select as best ask. */ \
+		else { \
+			if ((!prv_bst_ask) || (prv_bst_ask->tcks.val > tck_val)) { \
+				ask_upd = 1; \
+				hst->bst_ask_nam = tck; \
+			} \
+		} \
+\
+		/* We should not find both bid and ask null (hence not equal). */ \
+		check(hst->bst_bid_nam != hst->bst_ask_nam); \
+\
+	}
+
+/*
  * Update the bid-ask spread after the update of
  * @tck at the current time.
  */ 
-static inline void _hst_bas_upd(
+static inline void _hst_bas_cur_upd(
 	tb_lv1_hst *hst,
 	tb_lv1_tck *tck
 )
 {
-	
-	/* Read the current volume. */
-	const f64 vol = tck->vol_cur;
+	BAS_UPD(vol_cur, bst_cur_bid, bst_cur_ask);
+}
 
-	/* If @tck's volume is null, complex case. */
-	if (vol == 0) {
 
-		/* Determine if @tck is currently the best bid
-		 * or ask. */
-		tb_lv1_tck *bst_bid = hst->bst_bid;
-		tb_lv1_tck *bst_ask = hst->bst_ask;
-		check((bst_bid != bst_ask) || (bst_bid == 0));
+/*
+ * Update the bid-ask spread after the update of
+ * @tck at the maximal time.
+ */ 
+static inline void _hst_bas_max_upd(
+	tb_lv1_hst *hst,
+	tb_lv1_tck *tck
+)
+{
 
-		/* If best bid, search for the first lower price
-		 * level with a non-null current volume. */ 
-		if (tck == bst_bid) {
-			while (1) {
-				ns_mapn_u64 *prv = ns_map_u64_fn_inr(&tck->tcks);
-				if (!prv) {
-					hst->bst_bid = 0;
-					break;
-				}
-				tck = ns_cnt_of(prv, tb_lv1_tck, tcks);
-				if (tck->vol_cur > 0) {
-					debug("warning : found an ask price below the previous best bid price.\n");
-				}
-				if (tck->vol_cur < 0) {
-					hst->bst_bid = tck;
-					break;
-				}
-			}
+	/* First, update the max best bid and ask prices. */
+	assert(hst->bac_nb);
+	BAS_UPD(vol_max, bst_max_bid, bst_max_ask);
+
+	/*
+	 * If any change in best bid or ask, we need to update
+	 * the bid / ask curves.
+	 */
+	check(!(bid_upd && ask_upd));
+	check(bid_upd == (prv_bst_bid == hst->bst_max_bid));
+	check(ask_upd == (prv_bst_ask == hst->bst_max_ask));
+
+	/* If no bid or ask update, complete. */
+	if (!(bid_upd || ask_upd)) return;
+	const u64 tim_res = hst->tim_res;
+	const u64 bac_aid = hst->bac_aid;
+	const u64 bid_aid = hst->bid_aid;
+	const u64 ask_aid = hst->ask_aid;
+	const u64 prp_aid = (tck->tim_max - 1) / tim_res; 
+	const u64 new_aid = tck->tim_max / tim_res; 
+	check(prp_aid <= new_aid);
+	check(bid_aid <= prp_aid);
+	check(ask_aid <= prp_aid);
+	u64 *const bid_crv = hst->bid_crv;
+	u64 *const ask_crv = hst->ask_crv;
+
+	/*
+	 * If best bid update :
+	 */
+	if (bid_upd) {
+
+		/* Propagate previous best value until max time - 1. */
+		if (bac_aid <= prp_aid) {
+			const u64 prp_val = prv_bst_bid->tcks.val;
+			const u64 stt_aid = (bac_aid < bid_aid) ? bid_aid : bac_aid;
+			for (u64 aid = stt_aid; aid <= prp_aid; aid++) {
+				bid_crv[aid - bac_aid] = prp_val;
+			}	
 		}
 
-		/* If best ask, search for the first upper price
-		 * level with a non-null current volume. */ 
-		else if (tck == bst_ask) {
-			while (1) {
-				ns_mapn_u64 *nxt = ns_map_u64_fn_in(&tck->tcks);
-				if (!nxt) {
-					hst->bst_ask = 0;
-					break;
-				}
-				tck = ns_cnt_of(nxt, tb_lv1_tck, tcks);
-				if (tck->vol_cur < 0) {
-					debug("warning : found a bid price above the previous best ask price.\n");
-				}
-				if (tck->vol_cur > 0) {
-					hst->bst_ask = tck;
-					break;
-				}
-			}
-			
+		/* Select the best bid for the current aid.
+		 * If the previous value affected the current
+		 * cell, then set the best of current cell best
+		 * and new value.
+		 * If we're writing to a new cell, only use
+		 * the new value. */
+		const u64 cel_bst = bid_crv[new_aid - bac_aid];
+		const u64 crt_bst = hst->bst_max_bid->tcks.val;
+		check((cel_bst == (u64) -1) == (prp_aid != new_aid));
+		if (
+			(prp_aid != new_aid) ||
+			(cel_bst < crt_bst)
+		) {
+			bid_crv[new_aid - bac_aid] = crt_bst;
 		}
 
-		check((hst->bst_bid != hst->bst_ask) || (hst->bst_bid == 0));
+		/* Save the current aid. */
+		hst->bid_aid = new_aid;
 
 	}
 
-	/* If not a null volume, just select as new best bid
-	 * or ask if relevant. */
-	else {
-	
-		/* Determine if bid or ask, read the current tick. */
-		const u8 is_ask = _is_ask(vol);
-		const u64 tck_val = tck->tcks.val;
+	/*
+	 * If best ask update :
+	 */
+	if (ask_upd) {
 
-		/* If bid, if current price is superior to best
-		 * bid, select as best bid. */
-		if (!is_ask) {
-			tb_lv1_tck *bst_bid = hst->bst_bid;
-			if ((!bst_bid) || (bst_bid->tcks.val < tck_val)) {
-				hst->bst_bid = tck;
-			}
-
+		/* Propagate previous best value until max time - 1. */
+		if (bac_aid <= prp_aid) {
+			const u64 prp_val = prv_bst_ask->tcks.val;
+			const u64 stt_aid = (bac_aid < ask_aid) ? ask_aid : bac_aid;
+			for (u64 aid = stt_aid; aid <= prp_aid; aid++) {
+				ask_crv[aid - bac_aid] = prp_val;
+			}	
 		}
 
-		/* If ask, if current price is inferior to best
-		 * ask, select as best ask. */
-		else {
-			tb_lv1_tck *bst_ask = hst->bst_ask;
-			if ((!bst_ask) || (bst_ask->tcks.val > tck_val)) {
-				hst->bst_ask = tck;
-			}
+		/* Select the best ask for the current aid.
+		 * If the previous value affected the current
+		 * cell, then set the best of current cell best
+		 * and new value.
+		 * If we're writing to a new cell, only use
+		 * the new value. */
+		const u64 cel_bst = ask_crv[new_aid - bac_aid];
+		const u64 crt_bst = hst->bst_max_ask->tcks.val;
+		check((cel_bst == (u64) -1) == (prp_aid != new_aid));
+		if (
+			(prp_aid != new_aid) ||
+			(cel_bst > crt_bst)
+		) {
+			ask_crv[new_aid - bac_aid] = crt_bst;
 		}
 
-		/* We should not find both bid and ask null (hence not equal). */
-		check(hst->bst_bid != hst->bst_ask);
+		/* Save the current aid. */
+		hst->ask_aid = new_aid;
 
 	}
+
 }
 
 /********************
@@ -163,23 +280,39 @@ static inline void _hst_bas_upd(
  * Move the bid-ask curves.
  * Caused by an adjustment of the current time large
  * enough to cause re-anchoring during preparation.
-#error TODO BAC MOV, add NANs to the new elements IN DEBUG MODE.
  */
 static inline void _hst_bac_mov(
 	tb_lv1_hst *hst,
 	u64 shf
-);
+)
+{
+	assert(shf);
 
-/*
-#error TODO _bac_upd MUST UPDATE EVERY NAN CASE FOUND BEFORE @TIM
-#error   THE FACT THAT THEY ARE NAN MEANS THAT THERE WAS NO BID/ASK UPDATE IN THEIR TIME SPAN -> WE CAN JUST TAKE THE OLDEST ONE AND PROPAGATE IT.
-#error   PROCEDURE : FIND THE FIRST CASE BEFORE WITH A NON-NAN VALUE AND PROPAGATE IT ON THE RIGHT.
-#error   IF NONE, THERE WAS NO BID/ASK UPDATE SINCE BEFORE BAC START SO WE CAN TAKE THE OLDER ONE.
-*/
-static inline void _hst_bac_upd(
-	tb_lv1_hst *hst,
-	tb_lv1_tck *tck
-);
+	/* If no bid / ask curve, nothing to do. */
+	const u64 len = hst->bac_nb; 
+	if (!len) return;
+
+	/* Determine move attributes. */	
+	const u8 ovf = (shf >= len);
+	const u64 rem_nb = ovf ? 0 : len - shf;
+
+	/* Move old bac elements. */
+	u64 *const bid_crv = hst->bid_crv;
+	u64 *const ask_crv = hst->ask_crv;
+	if (rem_nb) {
+		ns_mem_cpy(bid_crv, bid_crv + shf, rem_nb * sizeof(u64));
+		ns_mem_cpy(ask_crv, ask_crv + shf, rem_nb * sizeof(u64));
+	}
+
+	/* Set new values to -1 in debug mode. */
+	#ifdef DEBUG
+	ns_mem_set(bid_crv + len - shf, 0xff, shf * sizeof(u64)); 
+	ns_mem_set(ask_crv + len - shf, 0xff, shf * sizeof(u64)); 
+	check(((u64 *) bid_crv)[len - shf] == (u64) -1);
+	check(((u64 *) ask_crv)[len - shf] == (u64) -1);
+	#endif
+
+}
 
 /***********
  * Heatmap *
@@ -279,8 +412,8 @@ static inline u64 _tck_ref_cpt(
 {
 
 	/* Read the current up-to-date bid and ask. */
-	tb_lv1_tck *bid = hst->bst_bid;
-	tb_lv1_tck *ask = hst->bst_ask;
+	tb_lv1_tck *bid = hst->bst_cur_bid;
+	tb_lv1_tck *ask = hst->bst_cur_ask;
 
 	/* Choose the current reference price based on their
 	 * existence. */
@@ -419,21 +552,28 @@ tb_lv1_hst *tb_lv1_ctr(
 	hst->tim_end = 0;
 
 	/* Reset ticks. */
-	hst->bst_bid = 0;
-	hst->bst_ask = 0;
+	hst->bst_cur_bid = 0;
+	hst->bst_cur_ask = 0;
 	hst->tck_ref = hmp_dim_tck >> 1;
 
 	/* Trigger a full heatmap generation next time. */
 	hst->hmp_tck_min = 0;
 	hst->hmp_tck_max = 0;
 
+	/* Reset bad metadata. */
+	hst->bst_max_bid = 0;
+	hst->bst_max_ask = 0;
+	hst->bac_aid = 0;
+	hst->bid_aid = 0;
+	hst->ask_aid = 0;
+
 	/* No re-anchoring. Will be set at first prp call. */
 	hst->hmp_shf_tim = 0;
 	
 	/* Allocate arrays. */
 	hst->hmp = nh_all(sizeof(f64) * hmp_dim_tim * hmp_dim_tck);
-	hst->bid = bac_nb ? nh_all(sizeof(f64) * bac_nb) : 0;
-	hst->ask = bac_nb ? nh_all(sizeof(f64) * bac_nb) : 0;
+	hst->bid_crv = bac_nb ? nh_all(sizeof(u64) * bac_nb) : 0;
+	hst->ask_crv = bac_nb ? nh_all(sizeof(u64) * bac_nb) : 0;
 
 	/* Complete. */
 	return hst;
@@ -464,8 +604,8 @@ void tb_lv1_dtr(
 
 	/* Free. */
 	nh_fre(hst->hmp, sizeof(f64) * hst->hmp_dim_tim * hst->hmp_dim_tck);
-	if (hst->bid) nh_fre(hst->bid, sizeof(f64) * hst->bac_nb);
-	if (hst->ask) nh_fre(hst->ask, sizeof(f64) * hst->bac_nb);
+	if (hst->bid_crv) nh_fre(hst->bid_crv, sizeof(u64) * hst->bac_nb);
+	if (hst->ask_crv) nh_fre(hst->ask_crv, sizeof(u64) * hst->bac_nb);
 	nh_fre_(hst);
 }
 
@@ -500,11 +640,15 @@ void tb_lv1_prp(
 	 * until the current time to determine the
 	 * re-anchoring height.
 	 */
+	check(!(tim_hmp_prv % tim_res));
+	check(!(tim_hmp_new % tim_res));
 	const u64 hmp_shf_tim = (tim_hmp_prv - tim_hmp_new) / tim_res;
 	if (hmp_shf_tim) {
 
 		/* Move the bid-ask curves. */
-		_hst_bac_mov(hst, hmp_shf_tim);
+		if (hst->bac_nb) { 
+			_hst_bac_mov(hst, hmp_shf_tim);
+		}
 
 		/* Count re-anchoring. */
 		SAFE_ADD(hst->hmp_shf_tim, hmp_shf_tim);
@@ -550,7 +694,6 @@ void tb_lv1_add(
 	const u8 has_bac = !!hst->bac_nb;
 	u64 tim_max = hst->tim_max;
 	assert(ini == (!tim_max));
-	const u64 bac_stt = hst->tim_hmp;
 	const u64 tim_end = hst->tim_end;
 	for (u64 upd_id = 0; upd_id < upd_nb; upd_id++) {
 
@@ -581,10 +724,8 @@ void tb_lv1_add(
 			tck->vol_cur = vol;
 			tck->vol_max = vol;
 
-			/* Update the bid ask spread and bid-ask
-			 * curves. */
-			_hst_bas_upd(hst, tck);
-			_hst_bac_upd(hst, tck);
+			/* Update the current bid-ask spread. */
+			_hst_bas_cur_upd(hst, tck);
 
 		}
 
@@ -600,13 +741,15 @@ void tb_lv1_add(
 			 * during processing. */
 			_upd_ctr(hst, tck, vol, tim);
 
-			/* Bid-ask spread will be updated during processing.
-			 * Just update the bid-ask curves. */
-			
-			/* If the update is in the bid/ask curves range, update them. */
-			if (has_bac && (bac_stt <= tim)) {
-				_hst_bac_upd(hst, tck);
-			}
+
+		}
+
+		/* If the update is in the bid/ask curves range, update them. */
+		if (has_bac) {
+
+			/* Now that an update was created at the max time,
+			 * update the bid-ask spread at max time. */
+			_hst_bas_max_upd(hst, tck);
 
 		}
 
@@ -648,7 +791,7 @@ void tb_lv1_prc(
 		tck->vol_cur = upd->vol;
 
 		/* Update the current bid-ask spread. */
-		_hst_bas_upd(hst, tck);
+		_hst_bas_cur_upd(hst, tck);
 
 		/* Fetch the successor. */
 		ns_sls *sls = upd->upds_hst.next; 
