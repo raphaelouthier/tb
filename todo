@@ -1,21 +1,11 @@
 TODO determine how to generate a coherent sequence of volume updates to test the lv1 lib.
 
-TODO we must support order data with non-increasing time
-	-> itb is OK but search must be updated :
-		-> to search between [stt, end] :
-           - start at stt - 1
-		   - increment until stt is reached.
-		   - iterate while end + 1 is reached or end.
-    - update testbench to have every other time be equal
-      to the other.
-	-> test that the search function returns the _proper_block and element.
-
-TODO when orderbook reconstruction lib is done, determine
-the number of price ticks to contains in the per-tb_stg_blk
-orderbook snapshot.
-
 TODO lv1 storage interface : generate the per-block orderbook snapshot.
 
 TODO test the lv1 storage interface by adding a storage step in the existing lv1 interface
 	-> store data, and use the storage API to load it in the history and test the result.
 
+
+TODO when orderbook reconstruction lib is done, determine
+the number of price ticks to contains in the per-tb_stg_blk
+orderbook snapshot.

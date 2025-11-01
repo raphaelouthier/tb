@@ -258,6 +258,9 @@ tb_sgm *tb_sgm_vopn(
 	/* Check that we covered the required size. */
 	assert(dat_siz == _dat_siz);
 
+	/* No mapping or resize needed anymore. */
+	ns_stg_cln(stg);
+
 	/* Complete. */
 	return sgm;
 
@@ -273,6 +276,7 @@ void tb_sgm_cls(
 
 	/* Cache data before unmapping. */
 	const u8 arr_nb = sgm->dsc->arr_nb;
+	const u8 rgn_nb = sgm->dsc->rgn_nb;
 
 	/* Sync. */
 	ns_stg *stg = sgm->stg;
@@ -287,7 +291,9 @@ void tb_sgm_cls(
 	nh_stg_cls(&sgm->res);
 
 	/* Delete. */
-	nh_fre(sgm, sizeof(tb_sgm) + arr_nb * sizeof(void *));
+	nh_fre(sgm->arrs, sizeof(void *) * arr_nb);
+	nh_fre(sgm->rgns, sizeof(void *) * rgn_nb);
+	nh_fre_(sgm);
 }
 
 /************

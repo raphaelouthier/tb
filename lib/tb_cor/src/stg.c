@@ -104,7 +104,7 @@ static inline inline uad _blk_elm_max(
 static const u8 _lvl_to_rgn_nb[3] = {
 	1, /* Syn. */
 	2, /* Syn + Orderbook state. */
-	3, /* Syn + Orderbook state. */
+	2, /* Syn + Orderbook state. */
 };
 static inline inline u8 _blk_rgn_nb(
 	u8 lvl
@@ -120,9 +120,9 @@ static inline inline u8 _blk_rgn_nb(
  * of level @lvl should contain.
  */
 static const u64 *const (_lvl_to_rgn_sizs[3]) = {
-	(u64 []) {0},
-	(u64 []) {TB_STG_RGN_SIZ_OBS},
-	(u64 []) {TB_STG_RGN_SIZ_OBS},
+	(u64 []) {TB_SGM_PAG_SIZ},
+	(u64 []) {TB_SGM_PAG_SIZ, TB_STG_RGN_SIZ_OBS},
+	(u64 []) {TB_SGM_PAG_SIZ, TB_STG_RGN_SIZ_OBS},
 };
 static inline const u64 *_blk_rgn_sizs(
 	u8 lvl
@@ -201,8 +201,6 @@ static inline u64 _dat_tim(
 	const u8 tid = _dat_tim_idx(lvl);
 	return ((const u64 *) srcs[tid])[idx];
 }
-	
-
 
 /*************************
  * Index table internals *
@@ -275,7 +273,7 @@ static inline void _itb_blk_end_set(
 }
 
 /*
- * Search @idx's table for a block covering @tim.
+ * Search @idx's table for the first block covering @tim.
  * If it is found, store its index at *@blk_nbrp
  * and return 0.
  * If it is in between two blocks, it is covered by the
@@ -294,9 +292,11 @@ static inline uerr _itb_sch(
 	volatile u64 (*tbl)[2] = idx->tbl;
 
 	/* Verify the table. */
+#ifdef DEBUG
 	for (u64 i = 0; i + 1 < blk_nb; i++) {
-		assert(_itb_blk_end(tbl, blk_nb, i) < _itb_blk_stt(tbl, blk_nb, i + 1));
+		check(_itb_blk_end(tbl, blk_nb, i) <= _itb_blk_stt(tbl, blk_nb, i + 1));
 	}
+#endif
 
 	/* If outside boundaries, stop. */
 	if (
@@ -368,6 +368,7 @@ static inline tb_stg_blk *_blk_ctr_lod(
 	const u8 arr_nb = _blk_arr_nb(idx->lvl);
 	const u8 *elm_sizs = _blk_elm_sizs(idx->lvl);
 
+
 	/* Open the block segment, it should already exist. */
 	tb_sgm *sgm = tb_sgm_fopn(
 		ctr,
@@ -387,12 +388,13 @@ static inline tb_stg_blk *_blk_ctr_lod(
 
 	/* Allocate. */
 	nh_all__(tb_stg_blk, blk);
+	check(!ns_map_sch(&idx->blks, blk_nbr, u64, tb_stg_blk, blks));
 	assert(!ns_map_u64_put(&idx->blks, &blk->blks, blk_nbr));
 	blk->idx = idx;
 	blk->sgm = sgm;
 	blk->syn = syn;
 	blk->uctr = 0;
-	
+
 	/* Complete. */
 	return blk;
 	
@@ -502,7 +504,6 @@ static inline u64 _blk_wrt(
 )
 {
 	assert(idx->key, "not a writeable index.\n");
-	check(arr_nb < 6);
 	check(arr_nb == _blk_arr_nb(idx->lvl));
 
 	/* Cache the timestamp of the last values. */
@@ -539,6 +540,49 @@ static inline u64 _blk_wrt(
  * Index internals *
  *******************/
 
+
+/*
+ * Load and return the block at index @blk_nbr of @idx.
+ */
+static inline _own_ tb_stg_blk *_idx_lod_nbr(
+	tb_stg_idx *idx,
+	u64 blk_nbr
+)
+{
+
+	/* Check if the block is loaded. */
+	tb_stg_blk *blk = ns_map_sch(&idx->blks, blk_nbr, u64, tb_stg_blk, blks);
+
+	/* Load the block if not. */
+	if (!blk) blk = _blk_lod(idx, blk_nbr);
+	assert(blk);
+
+	/* Once a block is found, take it and return it. */
+	return blk;
+
+}
+
+/*
+ * If @idx has a block covering @tim,
+ * load it and return it.
+ * Otherwise, return 0.
+ */
+static inline _own_ tb_stg_blk *_idx_lod_tim(
+	tb_stg_idx *idx,
+	u64 tim
+)
+{
+
+	/* Read the index. If no block covers the section, fail. */
+	u64 blk_nbr = 0;
+	const uerr err = _itb_sch(idx, tim, &blk_nbr);
+	if (err) return 0;
+	
+	/* Load. */
+	return _idx_lod_nbr(idx, blk_nbr);
+
+}
+
 /*
  * Return @idx's last block.
  * If it doesn't exist, return 0.
@@ -551,46 +595,11 @@ static inline tb_stg_blk *_idx_lst(
 	assert(idx->key);
 
 	/* Get the block number. */
-	const u64 blk_nb = _itb_nb(idx);
-	
-	/* Use the map. */
-	ns_mapn_u64 *nod = ns_map_u64_fi_inr(&idx->blks);
-	assert((!nod) == (!blk_nb));
+	const u64 blk_nbr = _itb_nb(idx);
+	if (!blk_nbr) return 0;
 
-	/* If no node, fail. */
-	if (!nod) return 0;
-
-	/* If a node is found, check that its number is the maximum. */
-	assert(nod->val == (blk_nb - 1));
-	return ns_cnt_of(nod, tb_stg_blk, blks);
-
-}
-
-/*
- * If @idx has a block covering @tim,
- * load it and return it.
- * Otherwise, return 0.
- */
-static inline _own_ tb_stg_blk *_idx_lod(
-	tb_stg_idx *idx,
-	u64 tim
-)
-{
-
-	/* Read the index. If no block covers the section, fail. */
-	u64 blk_nbr = 0;
-	const uerr err = _itb_sch(idx, tim, &blk_nbr);
-	if (err) return 0;
-	
-	/* Check if the block is loaded. */
-	tb_stg_blk *blk = ns_map_sch(&idx->blks, blk_nbr, u64, tb_stg_blk, blks);
-
-	/* Load the block if not. */
-	if (!blk) blk = _blk_lod(idx, blk_nbr);
-	assert(blk);
-
-	/* Once a block is found, take it and return it. */
-	return _blk_tak(blk);
+	/* Load. */
+	return _idx_lod_nbr(idx, blk_nbr - 1);
 
 }
 
@@ -747,6 +756,9 @@ void tb_stg_dtr(
 
 	/* No index should remain. */
 	assert(ns_map_str_emp(&sys->idxs));
+
+	/* Delete the segment. */
+	tb_sgm_cls(sys->sgm);
 
 	/* Free. */
 	nh_fre(sys->ini, 1024);
@@ -928,10 +940,14 @@ void tb_stg_cls(
  * If @idx has a block covering @tim, load it in memory,
  * and return it.
  */
-_own_ tb_stg_blk *tb_stg_lod(
+_own_ tb_stg_blk *tb_stg_lod_tim(
 	tb_stg_idx *idx,
 	u64 tim
-) {return _idx_lod(idx, tim);}
+)
+{
+	tb_stg_blk *blk = _idx_lod_tim(idx, tim);
+	return blk ? _blk_tak(blk) : 0;
+}
 
 /*
  * Unload @blk.
@@ -939,6 +955,46 @@ _own_ tb_stg_blk *tb_stg_lod(
 void tb_stg_unl(
 	_own_ tb_stg_blk *blk
 ) {_blk_rel(blk);}
+
+/*
+ * If @idx has a block for @tim, store its number
+ * at @blk_nbrp and return 0.
+ * Otherwise, return 1.
+ */
+uerr tb_stg_sch(
+	tb_stg_idx *idx,
+	u64 tim,
+	u64 *blk_nbrp
+) {return _itb_sch(idx, tim, blk_nbrp);}
+
+/*
+ * Iteration next.
+ */
+tb_stg_blk *tb_stg_red_nxt(
+	tb_stg_idx *idx,
+	tb_stg_blk *blk,
+	u64 end
+)
+{
+
+	/* Release. */
+	assert(blk);
+	const u64 blk_nbr = blk->blks.val;
+	_blk_rel(blk);
+
+	/* Read the index table.
+	 * If next block is after end time, nothing to do. */
+	const u64 itb_nbr = _itb_nb(idx);
+	check(blk_nbr < itb_nbr);
+	const u64 nxt_nbr = blk_nbr + 1;
+	if (((nxt_nbr) == itb_nbr) || (end < _itb_blk_end(idx->tbl, itb_nbr, nxt_nbr))) {
+		return 0;
+	}
+
+	/* If next block is in iteration range, load it. */
+	return _blk_tak(_idx_lod_nbr(idx, nxt_nbr));
+	
+}
 
 /*
  * If @blk is validated, return 0.
@@ -1038,7 +1094,7 @@ void tb_stg_wrt(
 
 		/* Get the start time of the data that we will write. */
 		const u64 stt = _dat_tim(idx->lvl, srcs, 0);
-		assert(prv_end < stt);
+		assert(prv_end <= stt);
 		
 		/* Create a block if required. */
 		const u8 crt = (!blk);
@@ -1070,7 +1126,7 @@ void tb_stg_wrt(
 			srcs,
 			arr_nb
 		);
-		assert((stt < end) || ((wrt_nb == 1) && (stt == end)));
+		assert(stt <= end);
 
 		/* If the block was just created, report
 		 * it as existing now that its data is populated. */

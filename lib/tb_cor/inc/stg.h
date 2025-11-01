@@ -19,6 +19,12 @@ types(
  **************/
 
 /*
+ * Every block's region 0 is reserved for its sync
+ * data, which occupies the first page.
+ */
+#define TB_STG_RGN_SIZ_SYN TB_SGM_PAG_SIZ
+
+/*
  * Levels 1 and 2 contain a snapshot of the orderbook
  * at the end of the block, so that orderbook
  * reconstruction does not need to go many blocks behind.
@@ -224,7 +230,7 @@ void tb_stg_cls(
  * If @idx has a block covering @tim, load it in memory,
  * and return it.
  */
-_own_ tb_stg_blk *tb_stg_lod(
+_own_ tb_stg_blk *tb_stg_lod_tim(
 	tb_stg_idx *idx,
 	u64 tim
 );
@@ -275,7 +281,6 @@ static inline u64 tb_sgm_arr(
 	
 }
 
-
 /*
  * Unload @blk.
  */
@@ -283,11 +288,45 @@ void tb_stg_unl(
 	_own_ tb_stg_blk *blk
 );
 
+/*
+ * If @idx has a block for @tim, store its number
+ * at @blk_nbrp and return 0.
+ * Otherwise, return 1.
+ */
+uerr tb_stg_sch(
+	tb_stg_idx *idx,
+	u64 tim,
+	u64 *blk_nbrp
+);
+
 #define ns_def_stt() for (u8 __ns_def_flg = 1;__ns_def_flg;) 
 #define ns_def_end() for(;__ns_def_flg;__ns_def_flg = 0)
 #define ns_def_(typ, nam, val) for (typ nam = val;__ns_def_flg;) 
 #define ns_def(typ, nam, val) ns_def_stt() ns_def_(typ, nam, val) ns_def_end()
 
+/*
+ * Iteration start.
+ */
+static inline tb_stg_blk *tb_stg_red_fst(
+	tb_stg_idx *idx,
+	u64 stt,
+	u64 end
+)
+{
+	assert(stt <= end);
+	tb_stg_blk *blk = tb_stg_lod_tim(idx, stt);
+	check(blk->uctr);
+	return blk;
+}
+
+/*
+ * Iteration next.
+ */
+tb_stg_blk *tb_stg_red_nxt(
+	tb_stg_idx *idx,
+	tb_stg_blk *blk,
+	u64 end
+);
 
 /*
  * Stream values of @idx in [@tim_stt, @tim_end].
@@ -299,8 +338,9 @@ void tb_stg_unl(
 	ns_def_(const u64 *, __tims, 0) \
 	ns_def_end() \
 	for ( \
-		tb_stg_blk *__blk = 0; \
-		(({if (__blk) tb_stg_unl(__blk);}),__tim <= __end) && (__blk = tb_stg_lod(idx, __tim)); \
+		tb_stg_blk *__blk = tb_stg_red_fst(idx, __tim, __end); \
+		__blk; \
+		__blk = tb_stg_red_nxt(idx, __blk, __end) \
 	) \
 	for ( \
 		u64 __blk_nb = ({u64 __nb = tb_sgm_arr(__blk, __tim, dsts, dst_nb); __tims = dsts[0]; __nb;}), blk_id = 0; \

@@ -19,6 +19,20 @@ static inline u8 _is_ask(
 	return vol > 0;
 }	
 
+/*
+ * Return the value for a best bid tick, null or not.
+ */
+static inline u64 _bst_bid_val(
+	tb_lv1_tck *tck
+) {return (tck) ? tck->tcks.val : 0;}
+
+/*
+ * Return the value for a best ask tick, null or not.
+ */
+static inline u64 _bst_ask_val(
+	tb_lv1_tck *tck
+) {return (tck) ? tck->tcks.val : (u64) -1;}
+
 /*****************
  * Price to tick *
  *****************/
@@ -163,7 +177,6 @@ static inline void _hst_bas_cur_upd(
 	BAS_UPD(vol_cur, bst_cur_bid, bst_cur_ask);
 }
 
-
 /*
  * Update the bid-ask spread after the update of
  * @tck at the maximal time.
@@ -183,8 +196,8 @@ static inline void _hst_bas_max_upd(
 	 * the bid / ask curves.
 	 */
 	check(!(bid_upd && ask_upd));
-	check(bid_upd == (prv_bst_bid == hst->bst_max_bid));
-	check(ask_upd == (prv_bst_ask == hst->bst_max_ask));
+	check(bid_upd == (prv_bst_bid != hst->bst_max_bid));
+	check(ask_upd == (prv_bst_ask != hst->bst_max_ask));
 
 	/* If no bid or ask update, complete. */
 	if (!(bid_upd || ask_upd)) return;
@@ -207,7 +220,7 @@ static inline void _hst_bas_max_upd(
 
 		/* Propagate previous best value until max time - 1. */
 		if (bac_aid <= prp_aid) {
-			const u64 prp_val = prv_bst_bid->tcks.val;
+			const u64 prp_val = _bst_bid_val(prv_bst_bid);
 			const u64 stt_aid = (bac_aid < bid_aid) ? bid_aid : bac_aid;
 			for (u64 aid = stt_aid; aid <= prp_aid; aid++) {
 				bid_crv[aid - bac_aid] = prp_val;
@@ -221,7 +234,7 @@ static inline void _hst_bas_max_upd(
 		 * If we're writing to a new cell, only use
 		 * the new value. */
 		const u64 cel_bst = bid_crv[new_aid - bac_aid];
-		const u64 crt_bst = hst->bst_max_bid->tcks.val;
+		const u64 crt_bst = _bst_bid_val(hst->bst_max_bid);
 		check((cel_bst == (u64) -1) == (prp_aid != new_aid));
 		if (
 			(prp_aid != new_aid) ||
@@ -242,7 +255,7 @@ static inline void _hst_bas_max_upd(
 
 		/* Propagate previous best value until max time - 1. */
 		if (bac_aid <= prp_aid) {
-			const u64 prp_val = prv_bst_ask->tcks.val;
+			const u64 prp_val = _bst_ask_val(prv_bst_ask);
 			const u64 stt_aid = (bac_aid < ask_aid) ? ask_aid : bac_aid;
 			for (u64 aid = stt_aid; aid <= prp_aid; aid++) {
 				ask_crv[aid - bac_aid] = prp_val;
@@ -256,7 +269,7 @@ static inline void _hst_bas_max_upd(
 		 * If we're writing to a new cell, only use
 		 * the new value. */
 		const u64 cel_bst = ask_crv[new_aid - bac_aid];
-		const u64 crt_bst = hst->bst_max_ask->tcks.val;
+		const u64 crt_bst = _bst_ask_val(hst->bst_max_ask);
 		check((cel_bst == (u64) -1) == (prp_aid != new_aid));
 		if (
 			(prp_aid != new_aid) ||

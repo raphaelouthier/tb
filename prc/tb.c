@@ -48,7 +48,9 @@ static inline u64 *_tim_all(
 	u64 val0 = ns_hsh_u32_rng(sed, 1, (u32) -1, 1);
 	for (u64 i = 0; i < nb; i++) {
 		tims[i] = val0;
-		val0 += 20;
+		if (i & 1) {
+			val0 += 20;
+		}
 	}
 	return tims;
 }
@@ -689,7 +691,6 @@ static inline void _get_dat(
 	}
 }
 
-
 /*
  * Per-thread level-specific entrypoint.
  */
@@ -712,6 +713,9 @@ static void _stg_exc_lvl(
 	_stg_lod(&sys, &idx, dsc);
 	assert(sys);
 	assert(idx);
+	
+	/* Reset the gate counter. */
+	dsc->syn->gat.ctr = 0;
 
 	assert(lvl < 3);
 	const u8 lvl_to_arr_nb[3] = {
@@ -768,23 +772,16 @@ static void _stg_exc_lvl(
 		}
 		wrt_id += stp_elm_nb;
 
-		/* Everyone unloads every 7 steps. */ 
-		const u8 unl = !(stp_id % 7);
-		if (unl) {
-			tb_stg_cls(idx, dsc->key);
-			tb_stg_dtr(sys);
-			idx = 0;
-			sys = 0;
-		}
-
 		GAT_PAS(dsc);
 
-		/* Everyone reloads if required. */
+		/* Everyone unloads every 7 steps. */ 
+		const u8 unl = !(stp_id % 7);
 		if (unl) {
 			_stg_lod(&sys, &idx, dsc);
 			assert(sys);
 			assert(idx);
 		}
+		GAT_PAS(dsc);
 
 		/* Everyone verifies the index table. */
 		const u64 itb_nb = tb_sgm_elm_nb(idx->sgm);
@@ -799,7 +796,7 @@ static void _stg_exc_lvl(
 		assert(itb[itb_nb - 1][1] == tim_end);
 		for (u64 blk_id = 0; blk_id < itb_nb; blk_id++) {
 			assert(itb[blk_id][0] <= itb[blk_id][1]);
-			assert((!blk_id) || (itb[blk_id - 1][1] < itb[blk_id][0]));
+			assert((!blk_id) || (itb[blk_id - 1][1] <= itb[blk_id][0]));
 			assert(itb[blk_id][0] == tims[3 * blk_id]);
 			if (blk_id + 1 == itb_nb) {
 				assert(
@@ -813,27 +810,51 @@ static void _stg_exc_lvl(
 			}
 		}
 
+		/* Generate the expected values. */
+		_get_dat(srcs, tims, dsc->dat, arr_nb, 0, _elm_sizs);
+
+		/* Everyone checks that a time query on the
+		 * index table returns the correct result. */
+		u64 tim0 = ns_hsh_u32_rng(dsc->sed, 1, (u32) -1, 1);
+		u64 nbr;
+		assert(tb_stg_sch(idx, tim0 - 1, &nbr));
+		for (u64 tst_id = 0; tst_id < wrt_id; tst_id++) {
+			const u64 tim = (tim0 + (tst_id >> 1) * 20);
+			assert(tims[tst_id] == tim);
+			assert(!tb_stg_sch(idx, tim, &nbr));
+			assert(nbr == ((tst_id & ~(u64) 1) / 3)); 
+		}
+		assert(tb_stg_sch(idx, (tim0 + (wrt_id >> 1) * 20) + 1, &nbr));
+
 		/* Everyone checks that they can access each block,
 		 * and that the block's data is the expected one. */
 
-		assert(!tb_stg_lod(idx, tim_stt - 1));
-		assert(!tb_stg_lod(idx, tim_end + 1));
+		assert(!tb_stg_lod_tim(idx, tim_stt - 1));
+		assert(!tb_stg_lod_tim(idx, tim_end + 1));
 
 		/* Check that start and end blocks can be accessed. */
 		tb_stg_blk *blk = 0;
-	    blk = tb_stg_lod(idx, tim_stt);
+	    blk = tb_stg_lod_tim(idx, tim_stt);
+		assert(blk->uctr == 1);
 		assert(blk);
 		tb_stg_unl(blk);
-		blk = tb_stg_lod(idx, tim_end);
+		assert(blk->uctr == 0);
+		blk = tb_stg_lod_tim(idx, tim_end);
 		assert(blk);
+		assert(blk->uctr == 1);
 		tb_stg_unl(blk);
+		assert(blk->uctr == 0);
 
-		/* Generate the expected values. */
-		_get_dat(srcs, tims, dsc->dat, arr_nb, 0, _elm_sizs);
+		/* All loaded blocks must be unused. */
+		ns_map_fe(blk, &idx->blks, blks, u64, in) {
+			assert(!blk->uctr);
+		}
+
 
 		/* Iterate over all blocks. */
 		u64 red_id = 0;
 		tb_stg_red(idx, tim_stt, tim_end, dsts, arr_nb) {
+			assert(__blk->uctr == 1);
 			for (u8 arr_id = 0; arr_id < arr_nb; arr_id++) {
 				const u8 elm_siz = _elm_sizs[arr_id];
 				if (elm_siz == 1) {
@@ -845,6 +866,17 @@ static void _stg_exc_lvl(
 			}
 			red_id++;
 		}	
+		assert(red_id == wrt_id); 
+
+		/* All blocks must be loaded and unused. */
+		u64 blk_nbr = 0;
+		ns_map_fe(blk, &idx->blks, blks, u64, in) {
+			assert(!blk->uctr);
+			assert(blk->blks.val == blk_nbr);
+			blk_nbr++;
+		}
+		assert(blk_nbr == itb_nb);
+
 	}
 
 	/* Unload. */
@@ -861,9 +893,9 @@ static u32 _stg_exc(
 )
 {
 	_stg_exc_lvl(dsc, 0);
-	return 0;
 	_stg_exc_lvl(dsc, 1);
 	_stg_exc_lvl(dsc, 2);
+	nh_fre_(dsc);
 	return 0;
 }
 
