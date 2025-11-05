@@ -936,6 +936,628 @@ static inline void _tst_stg(
 
 }
 
+/************
+ * Lv1 test *
+ ************/
+
+/*
+ * Orderbook update.
+ */
+typedef struct {
+
+	/* Price of update. */
+	f64 val;
+
+	/* Volume of update. */
+	f64 vol;
+
+	/* Time of update. */
+	u64 tim;
+
+} tb_tst_lv1_upd ;
+
+/*
+ * Orderbook generation context.
+ */
+typedef struct {
+
+	/*
+	 * Request.
+	 */
+
+	/* Seed. */
+	u64 sed;
+
+	/* Number of time units. */
+	u64 unt_nbr;
+
+	/* Start time. */
+	u64 tim_stt;
+
+	/* Time increment. */
+	u64 tim_inc;
+
+	/* Price minimum. */
+	f64 prc_min;
+
+	/* Tick min. */
+	u64 tck_min;
+
+	/* Tick max. */
+	u64 tck_max;
+
+	/*
+	 * Generation parameters.
+	 */
+
+	/* Generation base volume. */
+	f64 gen_vol;
+
+	/* Orderbook total reset period. */
+	u64 obk_rst_prd;
+
+	/* Orderbook volume reset period. */
+	u64 obk_vol_rst_prd;
+
+	/* Orderbook normal bid period. 1. */
+
+	/* Orderbook exceptional bid period. */
+	u64 obk_bid_exc_prd;
+
+	/* Orderbook bid reset period. */
+	u64 obk_bid_rst_prd;
+
+	/* Orderbook normal ask period. 1. */
+
+	/* Orderbook exceptional ask period. */
+	u64 obk_ask_exc_prd;
+
+	/* Orderbook ask reset period. */
+	u64 obk_ask_rst_prd;
+
+	/*
+	 * Generation constants.
+	 */
+
+	/* Total number of ticks in the orderbook. */
+	u64 tck_nbr;
+
+	/* Number of time beats per unit. */
+	u64 tim_stp;
+
+	/*
+	 * Generation stats.
+	 */
+
+	/* Current time. */
+	u64 tim_cur;
+
+	/* Current tick. */
+	u64 tck_cur;
+
+	/* Previous tick. */
+	u64 tck_prv;
+
+	/* Current generation step. */
+	u64 gen_idx;
+
+	/* Generation seed. */
+	u64 gen_sed;
+
+	/* Did an orderbook reset happen at last orderbook update ? */
+	u8 obk_rst;
+
+	/* Number of times the orderbook was reset. */
+	u64 obk_rst_ctr;
+
+	/* Number of times the orderbook was reset before a delay. */
+	u64 obk_rst_dly;
+
+	/* Number of times the orderbook was reset before a delay spanning at least one complete cell. */
+	u64 obk_rst_skp;
+
+	/*
+	 * Generation-output.
+	 */
+
+	/* Number of updates. */
+	u64 upd_nbr;
+
+	/* Maximal number of updates. */
+	u64 upd_max;
+
+	/* Updates array. */
+	tb_tst_lv1_upd *upds;
+
+	/* Bid array. */
+	u64 *bid_arr;
+
+	/* Ask array[unt_nbr]. */
+	u64 *ask_arr;
+
+	/* Global heatmap [unt_nbr * tim_stp][tck_nbr]. */
+	f64 *hmp;
+
+	/* Time of last update. */
+	u64 tim_end;
+
+} tb_tst_lv1_ctx;
+
+/*
+ * Update @ctx's current tick.
+ */
+static inline void _tck_upd(
+	tb_tst_lv1_ctx *ctx
+)
+{
+	u64 tck_cur = ctx->tck_cur; 
+	u64 gen_sed = ctx->gen_sed;
+	ctx->tck_prv = ctx->tck_cur;
+
+	/* Determine if we should go up or down. */
+	u8 up_ok = tck_cur + 1 < ctx->tck_max;
+	u8 dwn_ok = ctx->tck_min < tck_cur;
+	assert(up_ok || dwn_ok);
+	u8 is_dwn;
+	if (!up_ok) {
+		is_dwn = 1;
+	} else if (!dwn_ok) {
+		is_dwn = 0;
+	} else {
+		is_dwn = gen_sed & 1;
+	}
+	gen_sed = ns_hsh_mas_gen(gen_sed);
+
+	/* Determine the new target price. */
+	if (is_dwn) {
+		tck_cur = ns_hsh_u64_rng(gen_sed, ctx->tck_min, tck_cur + 1, 1);
+	} else {
+		tck_cur = ns_hsh_u64_rng(gen_sed, tck_cur, ctx->tck_max, 1);
+	}
+	ctx->gen_sed = ns_hsh_mas_gen(gen_sed);
+	ctx->tck_cur = tck_cur;
+	ctx->tck_prv = tck_cur;
+
+}
+
+/*
+ * Update @obk after @ctx's price was updated.
+ */
+static inline void _obk_upd(
+	tb_tst_lv1_ctx *ctx,
+	f64 *obk
+)
+{
+
+	/* Flags. */
+	ctx->obk_rst = 0;
+
+	/* Constants. */
+	const f64 gen_vol = ctx->gen_vol; 
+
+	/* Read the current and previous prices. */
+	const u64 tck_cur = ctx->tck_cur;
+	const u64 tck_prv = ctx->tck_prv;
+	const u64 tck_min = ctx->tck_min;
+	const u64 tck_max = ctx->tck_max;
+	assert(tck_min > 400);
+	#define OBK(idx) (obk[((idx) - tck_min)])
+	#define OBK_WRT(idx, val) ({ \
+		if ((tck_min <= idx) && (idx < tck_max)) { \
+			OBK(idx) = (val); \
+		} \
+	})
+
+	/* Read the seed. */
+	u64 gen_sed = ctx->gen_sed;
+	u64 gen_idx = ctx->gen_idx;
+
+	/* Reset ticks in between. */
+	{
+		assert(!(OBK(tck_prv)));
+		u64 rst_stt = tck_cur; 
+		u64 rst_end = tck_prv; 
+		if (rst_end < rst_stt) {
+			_swap(rst_end, rst_stt);
+		}
+		for (;rst_stt <= rst_end; rst_stt++) {
+			OBK(rst_stt) = 0;
+		}
+		assert(!(OBK(tck_cur)));
+	}
+
+	/* Reset around the current tick. */
+	{
+		if (gen_sed & (1 << 20)) {
+			u8 rst_up = (gen_sed & 0x7);
+			u8 rst_dwn = ((gen_sed >> 3) & 0x7);
+			for (
+				u64 rst_stt = (tck_cur - rst_dwn), rst_end = (tck_cur + rst_up);
+				rst_stt <= rst_end;
+				rst_stt++
+			) {
+				if ((tck_min <= rst_stt) && (rst_stt < tck_max)) {
+					OBK(rst_stt) = 0;
+				}	
+			}
+		}
+	}
+	gen_sed = ns_hsh_mas_gen(gen_sed);
+
+	/* Reset the orderbook if required. */ 
+	if (!(gen_idx % ctx->obk_rst_prd)) {
+		for (u64 idx = tck_min; idx < tck_max; idx++) {
+			OBK(idx) = 0;
+		}
+
+		/* Skip all other generation steps. */
+		goto end;
+	}
+
+	/* Normal and exceptional steps. */
+	static u64 nrm_stps[4] = {
+		1,
+		1,
+		5,
+		2		
+	};
+	static u64 exc_stps[3] = {
+		100,
+		200,
+		400
+	};
+	static u64 rst_stps[3] = {
+		12,
+		29,
+		51
+	};
+
+	/* Apply normal bids and ask updates on 10 ticks around the current price. */
+	if (1) { //!(gen_idx % ctx->obk_ask_nrm_prd)) {
+		f64 ask_max = ns_hsh_f64_rng(gen_sed, gen_vol / 2, gen_vol, gen_vol / 100);
+		const u64 stp = nrm_stps[(gen_idx) % 4];
+		for (u64 idx = tck_cur, ctr = 0; ((idx += stp) < tck_max) && (ctr++ < 10);) {
+			OBK(idx) = ask_max;
+			ask_max /= 2.;
+		}	
+		gen_sed = ns_hsh_mas_gen(gen_sed);
+	}
+	if (1) { //!(gen_idx % ctx->obk_bid_nrm_prd)) {
+		f64 bid_max = -ns_hsh_f64_rng(gen_sed, gen_vol / 2, gen_vol, gen_vol / 100);
+		const u64 stp = nrm_stps[(gen_idx) % 4];
+		for (u64 idx = tck_cur, ctr = 0; (tck_min <= (idx -= stp)) && (ctr++ < 10);) {
+			OBK(idx) = bid_max;
+			bid_max /= 2.;
+		}	
+		gen_sed = ns_hsh_mas_gen(gen_sed);
+	}
+
+	/* Apply exceptional bids and asks on the whole orderbook. */
+	if (!(gen_idx % ctx->obk_ask_exc_prd)) {
+		f64 ask_max = ns_hsh_f64_rng(gen_sed, gen_vol / 2, gen_vol, gen_vol / 100);
+		const u64 stp = exc_stps[(gen_idx / ctx->obk_ask_exc_prd) % 4];
+		for (u64 idx = tck_cur; (idx += stp) < tck_max;) {
+			OBK(idx) = ask_max;
+			ask_max /= 2.;
+		}	
+		gen_sed = ns_hsh_mas_gen(gen_sed);
+	}
+	if (!(gen_idx % ctx->obk_bid_exc_prd)) {
+		f64 bid_max = -ns_hsh_f64_rng(gen_sed, gen_vol / 2, gen_vol, gen_vol / 100);
+		const u64 stp = exc_stps[(gen_idx / ctx->obk_bid_exc_prd) % 4];
+		for (u64 idx = tck_cur; tck_min <= (idx -= stp);) {
+			OBK(idx) = bid_max;
+			bid_max /= 2.;
+		}	
+		gen_sed = ns_hsh_mas_gen(gen_sed);
+	}
+
+	/* Apply resets on the whole orderbook. */
+	if (!(gen_idx % ctx->obk_ask_rst_prd)) {
+		const u64 stp = rst_stps[(gen_idx / ctx->obk_ask_rst_prd) % 4];
+		for (u64 idx = tck_cur; (idx += stp) < tck_max;) {
+			OBK(idx) = 0;
+		}	
+		gen_sed = ns_hsh_mas_gen(gen_sed);
+	}
+	if (!(gen_idx % ctx->obk_bid_rst_prd)) {
+		const u64 stp = rst_stps[(gen_idx / ctx->obk_bid_rst_prd) % 4];
+		for (u64 idx = tck_cur; tck_min <= (idx -= stp);) {
+			OBK(idx) = 0;
+		}	
+		gen_sed = ns_hsh_mas_gen(gen_sed);
+	}
+
+	/* Save post generation params. */	
+	end:;
+	ctx->gen_sed = gen_sed;
+	ctx->gen_idx = gen_idx + 1;
+
+}
+
+/*
+ * Add @obk to @ctx's heatmap at column @col_idx.
+ */
+static inline void _hmp_add(
+	tb_tst_lv1_ctx *ctx,
+	f64 *obk,
+	u64 col_idx
+)
+{
+	
+	const u64 tck_nbr = ctx->tck_nbr;
+	const u64 tim_stp = ctx->tim_stp;
+	const u64 hmp_stt = col_idx * tim_stp * tck_nbr; 
+	for (u64 row_idx = tck_nbr; row_idx--;) {
+		ctx->hmp[hmp_stt + row_idx] += obk[row_idx];
+	}
+}
+
+/*
+ * Generate a sequence of orderbook updates as
+ * specified by @ctx.
+ */
+static inline void _tck_gen(
+	tb_tst_lv1_ctx *ctx
+)
+{
+	assert(ctx->unt_nbr < 10000);
+
+	/*
+	 * Constants.
+	 */
+
+	/* 100 ticks per price unit. */
+	const f64 prc_stp = 0.01;
+	
+	/* 1024 ticks. */
+	const u64 tck_nbr = ctx->tck_nbr = 1024;
+
+	/* 10 increments per time unit. */
+	const u64 tim_stp = ctx->tim_stp = 10; 
+
+	/* Skip between 1 and 100 beats time every 43 iterations. */
+	const u64 skp_prd = 43;
+
+	/* Read request data. */
+	const u64 unt_nbr = ctx->unt_nbr; 
+	const u64 tim_stt = ctx->tim_stt; 
+	const u64 tim_inc = ctx->tim_inc; 
+	const f64 prc_min = ctx->prc_min;
+
+	/* Allocate the updates array. */ 	
+	ctx->upd_max = ctx->unt_nbr * tim_stp; 
+	ctx->upds = nh_all(ctx->upd_max * sizeof(tb_tst_lv1_upd));
+	ctx->upd_nbr = 0;
+
+	/* Helper to resize the updates arrays. */
+	#define _upd_rsz(nb) ({ \
+		if (ctx->upd_max < (nb)) { \
+			u64 _upd_max = 2 * ctx->upd_max; \
+			assert((nb) <= ctx->upd_max); \
+			tb_tst_lv1_upd *_upds = nh_all(_upd_max * sizeof(tb_tst_lv1_upd)); \
+			ns_mem_cpy(_upds, ctx->upds, ctx->upd_max * sizeof(tb_tst_lv1_upd)); \
+			nh_fre(ctx->upds, ctx->upd_max * sizeof(tb_tst_lv1_upd)); \
+			ctx->upds = _upds; \
+			ctx->upd_nbr = (nb); \
+		} \
+	})
+
+	/* Generate the range. */
+	const u64 tck_min = ctx->tck_min = (u64) ((f64) ((f64) prc_min * (f64) prc_stp));
+	const u64 tck_max = ctx->tck_max = tck_min + tck_nbr;
+	check(tck_min < tck_max);
+
+	/* Allocate two orderbooks. */
+	u64 obk_siz = tck_nbr * sizeof(f64);
+	f64 *const obk0 = nh_all(obk_siz);
+	f64 *const obk1 = nh_all(obk_siz);
+
+	/* Allocate the bitmap. */
+	u64 bmp_siz = tck_nbr;
+	u8 *bmp = nh_all(bmp_siz);
+
+	/* Choose the initial tick. */
+	ctx->tck_cur = ctx->tck_prv = ns_hsh_u64_rng(ctx->gen_sed, tck_min, tck_max + 1, 1);
+	ctx->gen_sed = ns_hsh_mas_gen(ctx->gen_sed);
+	ctx->gen_idx = 0;
+
+	/* Generate the initial state. */
+	f64 *obk_prv = obk0;
+	f64 *obk_cur = obk1;
+	for (u64 i = 0; i < tck_nbr; i++) obk_prv[i] = 0;
+	_obk_upd(ctx, obk_prv);
+	ns_mem_cpy(obk_cur, obk_prv, obk_siz);
+
+	/* Allocate the bid/ask arrays. */
+	ctx->bid_arr = nh_all(unt_nbr * sizeof(u64));
+	ctx->ask_arr = nh_all(unt_nbr * sizeof(u64));
+
+	/* Allocate the heatmap. */
+	const u64 hmp_nbr = unt_nbr * tim_stp * tck_nbr; 
+	ctx->hmp = nh_all(hmp_nbr * sizeof(f64));
+	ns_mem_rst(ctx->hmp, hmp_nbr * sizeof(f64));
+
+	{
+		/* Verify that each tick was accounted for, determine
+		 * the current best bid. */
+		u64 bst_bid = 0;
+		u64 bst_ask = (u64) -1;
+		for (u64 idx = 0; idx < tck_nbr; idx++) {
+			const f64 vol = obk_cur[idx];
+			if (!vol) continue;
+			const u8 is_bid = vol < 0;
+			const u64 tck_idx = tck_min + idx;
+			assert(tck_idx);
+			assert(tck_idx != (u64) -1);
+			if (is_bid) {
+				assert(bst_ask == (u64) -1); // Bid found at tick below first ask.
+				if (bst_bid < tck_idx) bst_bid = tck_idx;
+			} else {
+				if (bst_ask != (u64) -1) bst_ask = tck_idx;
+			}
+		}
+		assert(bst_bid < bst_ask);
+		ctx->bid_arr[0] = bst_bid;
+		ctx->ask_arr[0] = bst_ask;
+	}
+
+	/* Tick update offsets. */
+	static u64 prms[8] = {
+		1,
+		3,
+		19,
+		31,
+		59,
+		241,
+		701,
+		947
+	};
+	u8 prm_idx = 0;
+
+	/* Generate as many updates as requested. */ 
+	u64 tim_lst = tim_stt;
+	u64 tim_cur = tim_lst;
+	const u64 tim_end = tim_stt + tim_stp * unt_nbr;
+	assert(tim_end < tim_cur);
+	assert(!(tim_stt % tim_stp));
+	assert(!(tim_end % tim_stp));
+	u64 itr_idx = 0;
+	while (tim_cur < tim_end) {
+
+		/* Periodically let some time pass, up to 10 columns. */
+		if (!(itr_idx % skp_prd)) {
+
+			/* Determine how much time should pass. */
+			u64 skp_nb = ns_hsh_u8_rng(ctx->gen_sed, 1, 30, 1);
+			if (ctx->obk_rst) {
+				SAFE_INCR(ctx->obk_rst_dly);
+				if (skp_nb > 20) {
+					SAFE_INCR(ctx->obk_rst_skp);
+				}
+			}
+
+			/* Iteratively add the current orderbook to
+			 * the heatmap and add time increment. */
+			while (skp_nb--) {
+				const u64 aid_cur = ((tim_cur - tim_stt)) / tim_stp;
+				_hmp_add(ctx, obk_cur, aid_cur);
+				tim_cur += tim_inc;
+			}
+
+		}
+
+		/* Enlarge and propagate the bid/ask curve. */
+		check(tim_cur != 0);
+		const u64 aid_lst = ((tim_lst - tim_stt)) / tim_stp;
+		const u64 aid_prv = ((tim_cur - 1 - tim_stt)) / tim_stp;
+		const u64 aid_cur = ((tim_cur - tim_stt)) / tim_stp;
+		assert(aid_cur < unt_nbr);
+		if (aid_lst != aid_prv) {
+			for (u64 idx = aid_prv + 1; idx <= aid_lst; idx++) {
+				ctx->bid_arr[idx] = ctx->bid_arr[aid_prv];
+				ctx->ask_arr[idx] = ctx->ask_arr[aid_prv];
+			}
+		}
+		if (aid_prv != aid_cur) {
+			ctx->bid_arr[aid_cur] = 0;
+			ctx->ask_arr[aid_cur] = (u64) -1;
+		}
+		tim_lst = tim_cur;
+
+		/* Generate the new current tick. */
+		_tck_upd(ctx);
+
+		/* Generate a new orderbook state. */
+		_obk_upd(ctx, obk_cur);
+
+		/* Traverse the orderbooks in a different order. */
+		ns_mem_rst(bmp, bmp_siz);
+		u64 prm = prms[prm_idx];
+		check(prm % tck_nbr);
+		check(tck_nbr % prm);
+		for (u64 idx = 0; idx < tck_nbr; idx++) {
+
+			/* Reorder. */
+			const u64 tck_idx = (itr_idx + prm * idx) % tck_nbr; 
+
+			/* Report tick processed. */
+			assert(!bmp[tck_idx]);
+			bmp[tck_idx] = 1;
+
+			/* Read prev and current volume. */
+			const f64 vol_prv = obk_prv[tck_idx];
+			const f64 vol_cur = obk_cur[tck_idx];
+			if (vol_prv == vol_cur) continue;
+			obk_prv[tck_idx] = vol_cur;
+
+			/* If required, generate a tick update. */ 
+			u64 upd_nbr = ctx->upd_nbr;
+			_upd_rsz(upd_nbr + 1);
+			check(upd_nbr < ctx->upd_max);
+			ctx->upds[upd_nbr].tim = tim_cur;	
+			ctx->upds[upd_nbr].val = prc_min + prc_stp * (f64) tck_idx;
+			ctx->upds[upd_nbr].vol = vol_cur;
+			ctx->upd_nbr++;
+			
+		}
+		
+		/* Verify that each tick was accounted for, determine
+		 * the current best bid. */
+		{
+			u64 bst_bid = 0;
+			u64 bst_ask = (u64) -1;
+			for (u64 idx = 0; idx < tck_nbr; idx++) {
+				assert(bmp[idx] == 1);
+				const f64 vol = obk_cur[idx];
+				assert(obk_prv[idx] == vol);
+				if (!vol) continue;
+				const u8 is_bid = vol < 0;
+				const u64 tck_idx = tck_min + idx;
+				assert(tck_idx);
+				assert(tck_idx != (u64) -1);
+				if (is_bid) {
+					assert(bst_ask == (u64) -1); // Bid found at tick below first ask.
+					if (bst_bid < tck_idx) bst_bid = tck_idx;
+				} else {
+					if (bst_ask != (u64) -1) bst_ask = tck_idx;
+				}
+			}
+			assert(bst_bid < bst_ask);
+
+			/* Incorporate the best bid and best ask. */
+			if (ctx->bid_arr[aid_cur] < bst_bid) ctx->bid_arr[aid_cur] = bst_bid;
+			if (ctx->ask_arr[aid_cur] > bst_ask) ctx->ask_arr[aid_cur] = bst_ask;
+		}
+
+		/* Update the number of remaining updates. */
+		assert(ctx->upd_nbr <= ctx->upd_max);
+
+		/* Incorporate the current column to the heatmap,
+		 * update the current time. */
+		_hmp_add(ctx, obk_cur, aid_cur);
+		tim_cur += tim_inc;
+		itr_idx++;
+
+	}
+	assert(tim_cur == tim_end);
+
+	/* Compute the actual average of hashmap cells. */
+	for (u64 hmp_idx = hmp_nbr; hmp_idx--;) {
+		ctx->hmp[hmp_idx] /= (f64) tim_stp;
+	}
+
+	/* Release. */
+	nh_fre(obk0, obk_siz);
+	nh_fre(obk1, obk_siz);
+	nh_fre(bmp, bmp_siz);
+
+	/* Transmit generation data. */
+	assert(tim_cur > tim_stt);
+	assert(tim_cur - tim_inc >= tim_stt);
+	ctx->tim_end = tim_cur - tim_inc;
+
+}
 
 /**********************
  * Reproduction tests *
