@@ -980,11 +980,6 @@ typedef struct {
 	/* Price minimum. */
 	f64 prc_min;
 
-	/* Tick min. */
-	u64 tck_min;
-
-	/* Tick max. */
-	u64 tck_max;
 
 	/*
 	 * Generation parameters.
@@ -1044,6 +1039,12 @@ typedef struct {
 	/* Generation seed. */
 	u64 gen_sed;
 
+	/* Tick min. */
+	u64 tck_min;
+
+	/* Tick max. */
+	u64 tck_max;
+
 	/* Did an orderbook reset happen at last orderbook update ? */
 	u8 obk_rst;
 
@@ -1077,6 +1078,9 @@ typedef struct {
 
 	/* Global heatmap [unt_nbr * tim_stp][tck_nbr]. */
 	f64 *hmp;
+
+	/* Init heatmap. Each cell has the resting value for its price/time. */
+	f64 *hmp_ini;
 
 	/* Time of last update. */
 	u64 tim_end;
@@ -1281,7 +1285,8 @@ static inline void _obk_upd(
 static inline void _hmp_add(
 	tb_tst_lv1_ctx *ctx,
 	f64 *obk,
-	u64 col_idx
+	u64 col_idx,
+	u64 nxt_idx
 )
 {
 	
@@ -1290,6 +1295,13 @@ static inline void _hmp_add(
 	const u64 hmp_stt = col_idx * tim_stp * tck_nbr; 
 	for (u64 row_idx = tck_nbr; row_idx--;) {
 		ctx->hmp[hmp_stt + row_idx] += obk[row_idx];
+	}
+	if (col_idx != nxt_idx) {
+		assert(nxt_idx == col_idx + 1);
+		const u64 hmp_nxt = nxt_idx * tim_stp * tck_nbr; 
+		for (u64 row_idx = tck_nbr; row_idx--;) {
+			ctx->hmp[hmp_nxt + row_idx] += obk[row_idx];
+		}
 	}
 }
 
@@ -1373,10 +1385,12 @@ static inline void _tck_gen(
 	ctx->bid_arr = nh_all(unt_nbr * sizeof(u64));
 	ctx->ask_arr = nh_all(unt_nbr * sizeof(u64));
 
-	/* Allocate the heatmap. */
+	/* Allocate the heatmap and its initial copy. */
 	const u64 hmp_nbr = unt_nbr * tim_stp * tck_nbr; 
 	ctx->hmp = nh_all(hmp_nbr * sizeof(f64));
+	ctx->hmp_ini = nh_all(hmp_nbr * sizeof(f64));
 	ns_mem_rst(ctx->hmp, hmp_nbr * sizeof(f64));
+	ns_mem_rst(ctx->hmp_ini, hmp_nbr * sizeof(f64));
 
 	{
 		/* Verify that each tick was accounted for, determine
@@ -1441,7 +1455,8 @@ static inline void _tck_gen(
 			 * the heatmap and add time increment. */
 			while (skp_nb--) {
 				const u64 aid_cur = ((tim_cur - tim_stt)) / tim_stp;
-				_hmp_add(ctx, obk_cur, aid_cur);
+				const u64 aid_nxt = ((tim_cur + tim_stp - tim_stt)) / tim_stp;
+				_hmp_add(ctx, obk_cur, aid_cur, aid_nxt);
 				tim_cur += tim_inc;
 			}
 
@@ -1452,6 +1467,7 @@ static inline void _tck_gen(
 		const u64 aid_lst = ((tim_lst - tim_stt)) / tim_stp;
 		const u64 aid_prv = ((tim_cur - 1 - tim_stt)) / tim_stp;
 		const u64 aid_cur = ((tim_cur - tim_stt)) / tim_stp;
+		const u64 aid_nxt = ((tim_cur + tim_stp - tim_stt)) / tim_stp;
 		assert(aid_cur < unt_nbr);
 		if (aid_lst != aid_prv) {
 			for (u64 idx = aid_prv + 1; idx <= aid_lst; idx++) {
@@ -1535,7 +1551,7 @@ static inline void _tck_gen(
 
 		/* Incorporate the current column to the heatmap,
 		 * update the current time. */
-		_hmp_add(ctx, obk_cur, aid_cur);
+		_hmp_add(ctx, obk_cur, aid_cur, aid_nxt);
 		tim_cur += tim_inc;
 		itr_idx++;
 
@@ -1556,6 +1572,38 @@ static inline void _tck_gen(
 	assert(tim_cur > tim_stt);
 	assert(tim_cur - tim_inc >= tim_stt);
 	ctx->tim_end = tim_cur - tim_inc;
+
+}
+
+/*
+ * Entrypoint for lv1 tests.
+ */
+static inline void _tst_lv1(
+	nh_tst_sys *sys,
+	u64 sed,
+	u8 wrk_nb,
+	u8 prc
+)
+{
+
+	/* Generation settings. */ 
+	tb_tst_lv1_ctx ctx;
+	ctx.sed = sed;
+	ctx.unt_nbr = 1000;
+	ctx.tim_stt = ns_hsh_u32_rng(sed, 1, (u32) -1, 1);
+	ctx.tim_inc = 1000000;
+	ctx.prc_min = 10000;
+	ctx.gen_vol = 10000;
+	ctx.obk_rst_prd = 100;
+	ctx.obk_vol_rst_prd = 43;
+	ctx.obk_vol_rst_prd = 47;
+	ctx.obk_bid_exc_prd = 8;
+	ctx.obk_ask_exc_prd = 9;
+	ctx.obk_bid_rst_prd = 23;
+	ctx.obk_ask_rst_prd = 27;
+
+	/* Generate tick data. */
+	_tck_gen(&ctx);
 
 }
 
@@ -1594,13 +1642,15 @@ static u32 _mux_one(
 		"execute a single test.",
 		(0, flg, rpr, (rpr), "run reproduction tests."),
 		(0, flg, sgm, (sgm), "run segment tests."),
-		(0, flg, stg, (stg), "run storage tests.")
+		(0, flg, stg, (stg), "run storage tests."),
+		(0, flg, lv1, (lv1), "run storage tests.")
 	);
 	u32 tst_cnt = 0;
 	nh_tst_sys *sys = nh_tst_sys_ctr();
 	if (rpr__flg) tst(rpr); 
 	if (sgm__flg) tst(sgm, thr_nb, prc); 
 	if (stg__flg) tst(stg, thr_nb, prc); 
+	if (lv1__flg) tst(lv1, thr_nb, prc); 
 	assert(nh_tst_don(sys));
 	debug("tb tests : %u testbenches ran, %U sequences, %U unit tests, %U errors.\n", tst_cnt, sys->seq_cnt, sys->unt_cnt, sys->err_cnt);
 	u32 ret = sys->err_cnt != 0;
@@ -1624,6 +1674,7 @@ static u32 _mux_all(
 	tst(rpr);
 	tst(sgm, thr_nb, prc);
 	tst(stg, thr_nb, prc);
+	tst(lv1, thr_nb, prc);
 	assert(nh_tst_don(sys));
 	debug("tb tests : %u testbenches ran, %U sequences, %U unit tests, %U errors.\n", tst_cnt, sys->seq_cnt, sys->unt_cnt, sys->err_cnt);
 	u32 ret = sys->err_cnt != 0;
