@@ -5,6 +5,7 @@ nh_cmps := nh_dft=hs
 # Ns
 .cf.ns.mlt := 64
 .cf.ns.a64 := 1
+.cf.ns.mck := 1
 .cf.nh.mv_dyn := 0
 .cf.nh.pmem := 1
 .cf.nh.dmem := 1
