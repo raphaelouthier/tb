@@ -1374,7 +1374,7 @@ static inline void _tck_gen(
 	const u64 tck_rat = ctx->tck_rat;
 
 	/* 100 ticks per price unit. */
-	const f64 prc_cfc = tck_rat;
+	const f64 prc_cfc = (f64) tck_rat;
 	const f64 prc_stp = 1 / prc_cfc;
 	assert(prc_cfc == (f64) 1 / prc_stp);
 
@@ -1398,7 +1398,7 @@ static inline void _tck_gen(
 	})
 
 	/* Generate the range. */
-	const u64 tck_min = ctx->tck_min = (u64) ((f64) ((f64) prc_min * (f64) prc_cfc));
+	const u64 tck_min = ctx->tck_min = (u64) ((f64) (prc_min * prc_cfc));
 	const u64 tck_max = ctx->tck_max = tck_min + tck_nbr;
 	check(tck_min < tck_max);
 
@@ -1545,7 +1545,6 @@ static inline void _tck_gen(
 		if (aid_prv != aid_cur) {
 			ctx->bid_arr[aid_cur] = 0;
 			ctx->ask_arr[aid_cur] = (u64) -1;
-			ctx
 		}
 		tim_lst = tim_cur;
 
@@ -1694,7 +1693,7 @@ static inline void _tst_lv1(
 	nh_tst_sys *sys,
 	u64 sed,
 	u8 wrk_nb,
-	u8 prc
+	u8 run_prc
 )
 {
 
@@ -1709,7 +1708,7 @@ static inline void _tst_lv1(
 	#define TCK_RAT 100
 	const u64 cel_dim_tim = TIM_INC * TIM_STP;
 	const f64 prc_stp = (f64) 1 / (f64) TCK_RAT;
-	const u64 tim_stt = ns_hsh_u32_rng(sed, (HMP_DIM_TIM + 1) * cel_dim_tim, (u32) -1, cel_dim_tim);
+	const u64 tim_stt = ns_hsh_u32_rng(sed, (HMP_DIM_TIM + 1) * TIM_INC * TIM_STP, (u32) -1, TIM_INC * TIM_STP);
 
 	/* Generation settings. */ 
 	nh_all__(tb_tst_lv1_ctx, ctx);
@@ -1763,12 +1762,12 @@ static inline void _tst_lv1(
 	);
 
 	/* Set initial prices in groups of 19 by step of 19. */
-	assert(tck_nbr & 19);
-	assert(19 % tck_nbr);
+	assert(TCK_NBR & 19);
+	assert(19 % TCK_NBR);
 	for (u32 i = 0; i < TCK_NBR;) {
 		u32 j = 0;
-		for (; (j < 19) && (i < tck_nbr); i++; j++) {
-			u32 ri = (19 * i) % tck_nbr;
+		for (; (j < 19) && (i < TCK_NBR); i++, j++) {
+			u32 ri = (19 * i) % TCK_NBR;
 			prcs[j] = TCK_TO_PRC(ri, PRC_MIN, prc_stp); 
 			vols[j] = ctx->hmp_ini[ri];
 		}
@@ -1832,9 +1831,9 @@ static inline void _tst_lv1(
 	u64 bst_ask = ctx->ask_ini[0];
 
 	/* Incorporate into best bid / ask. */
-	#define _bac_add(aid, prc, vol, tim) ({ \
+	#define _bac_add(prc, vol, tim) ({ \
 		const u64 aid_bac = (tim - tim_stt) / cel_dim_tim; \
-		assert(bst_bac_aid <= aid_bac); \ 
+		assert(bst_bac_aid <= aid_bac); \
 		if (aid_bac != bst_bac_aid) { \
 			bst_bac_aid = aid_bac; \
 			bst_bid = ctx->bid_ini[bst_bac_aid]; \
@@ -1855,22 +1854,23 @@ static inline void _tst_lv1(
 		u64 i = 0;
 		while (bac_idx < upd_nb) {
 			const u64 tim = upds[bac_idx].tim; 
-			if (tim > bac_tim) break;
+			if (tim > tim_bac) break;
 
 			/* Add. */
 			tims[i] = tim;
 			const f64 prc = prcs[i] = upds[bac_idx].val;
 			const f64 vol = vols[i] = upds[bac_idx].vol;
+			const u64 tck = PRC_TO_TCK(prc, PRC_MIN, TCK_RAT); 
 
 			/* Incorporate in best bid / ask. */
-			_bac_add(prc, vol, tim);
+			_bac_add(tck, vol, tim);
 
 			bac_idx++;
 			i++;
 
 
 			/* If buffer full, flush. */
-			if (i == 2 * TCK_NB) {
+			if (i == 2 * TCK_NBR) {
 				tb_lv1_add(hst, i, tims, prcs, vols);
 				i = 0;
 			}
@@ -1885,7 +1885,7 @@ static inline void _tst_lv1(
 		/* Add the required number of updates, keep track of the bac time. */
 		const u64 add_nb = add_stps[itr_idx % STP_NB];
 		assert(bac_idx + 1 < upd_nb);
-		assert(bac_tim < upds[bac_idx + 1].tim); 
+		assert(tim_bac < upds[bac_idx + 1].tim); 
 		i = 0;
 		for (; (i < add_nb) && (bac_idx < upd_nb); (i++), (bac_idx++)) {
 
@@ -1893,11 +1893,12 @@ static inline void _tst_lv1(
 			const f64 prc = prcs[i] = upds[bac_idx].val;
 			const f64 vol = vols[i] = upds[bac_idx].vol;
 			const u64 tim = tims[i] = upds[bac_idx].tim;
+			const u64 tck = PRC_TO_TCK(prc, PRC_MIN, TCK_RAT); 
 			assert(tim_bac <= tim);
 			tim_bac = tim;
 
 			/* Incorporate in best bid / ask. */
-			_bac_add(prc, vol, tim);
+			_bac_add(tck, vol, tim);
 		}
 
 		/* Add all updates. */
@@ -1907,16 +1908,17 @@ static inline void _tst_lv1(
 		i = 0;
 		while (bac_idx < upd_nb) {
 			const u64 tim = upds[bac_idx].tim; 
-			assert(tim_bac <= tim)
+			assert(tim_bac <= tim);
 			if (tim_bac != tim) break;
 
 			/* Add. */
 			tims[i] = tim;
 			const f64 prc = prcs[i] = upds[bac_idx].val;
 			const f64 vol = vols[i] = upds[bac_idx].vol;
+			const u64 tck = PRC_TO_TCK(prc, PRC_MIN, TCK_RAT); 
 
 			/* Incorporate in best bid / ask. */
-			_bac_add(prc, vol, tim);
+			_bac_add(tck, vol, tim);
 
 			bac_idx++;
 			i++;
@@ -1952,16 +1954,17 @@ static inline void _tst_lv1(
 			/* Incorporate. */
 			const u64 aid = (tim - tim_stt) / cel_dim_tim;
 			assert(aid >= chc_aid);
-			if (aid != aid_chc) {
+			if (aid != chc_aid) {
+				chc_aid = aid;
 				u64 aid_tim = aid * cel_dim_tim + tim_stt;
-				for (u32 i = 0; i < TCK_NBR; i++) {
-					chc_tims[i] = aid_tim;
-					chc_avgs[i] = 0;
+				for (u32 rst_idx = 0; rst_idx < TCK_NBR; rst_idx++) {
+					chc_tims[rst_idx] = aid_tim;
+					chc_sums[rst_idx] = 0;
 				}
 			}
-			assert(tim >= chk_tims[tck]);
-			if (tim != chk_tims[tck]) {
-				chk_avgs[i] += (f64) (tim - chk_tims[tck]) * vol;
+			assert(tim >= chc_tims[tck]);
+			if (tim != chc_tims[tck]) {
+				chc_sums[tck] += (f64) (tim - chc_tims[tck]) * vol;
 			}
 			chc_vols[tck] = vol;
 			chc_tims[tck] = tim;
@@ -1979,10 +1982,10 @@ static inline void _tst_lv1(
 		assert(!(tim_stt % cel_dim_tim));
 		assert(tim_cur >= tim_stt);
 		const u64 aid_bac = (tim_cur + cel_dim_tim - 1 - tim_stt) / cel_dim_tim;
-		const s64 aid_hmp = aid_bac - HMP_DIM_TIM;  
+		const s64 aid_hmp = (s64) aid_bac - HMP_DIM_TIM;  
 		const f64 *hmp = tb_lv1_hmp(hst);
-		for (u64 i = 0; i < HMP_DIM_TIM - 1; i++) {
-			s64 col_idx = aid_hmp + i; 
+		for (s64 cnt = 0; cnt < HMP_DIM_TIM - 1; cnt++) {
+			s64 col_idx = aid_hmp + cnt; 
 
 			/* If column is before start point, it must be equal
 			 * to the history's reset prices.
@@ -2010,29 +2013,39 @@ static inline void _tst_lv1(
 		for (u64 row_idx = 0; row_idx < HMP_DIM_TCK; row_idx++) {
 			assert(tim_cur >= chc_tims[row_idx]);
 			const f64 avg = (div) ? 
-				(chc_sums[row_idx] + (tim_cur - chc_tims[row_idx]) * chc_vols[row_idx]) / (f64) div :
+				(chc_sums[row_idx] + (f64) (tim_cur - chc_tims[row_idx]) * chc_vols[row_idx]) / (f64) div :
 				chc_vols[row_idx];
 
 			assert(hmp_cmp[row_idx] == avg,
 				"heatmap mismatch at current column row %U/%U (tick %U/%U) : expected %d got %d.\n",
-				GMP_DIM_TIM - 1, HMP_DIM_TIM - 1, row_idx, HMP_DIM_TCK, row_idx + lst_off, TCK_NBR,  
+				HMP_DIM_TIM - 1, HMP_DIM_TIM - 1, row_idx, HMP_DIM_TCK,  
 				avg, hmp_cmp[row_idx]
 			);
 		}
 
 		/* Verify all values of the bid-ask curves except the current one. */
-		const f64 *bid = tb_lv1_bid(hst);
-		const f64 *ask = tb_lv1_ask(hst);
-		for (u64 bac_idx = 0; bac_idx < BAC_SIZ - 1; bac_idx++) {
-			assert(bid[bac_idx] == ctx->bid[aid_bac + bac_idx],
+		const u64 *bid = tb_lv1_bid(hst);
+		const u64 *ask = tb_lv1_ask(hst);
+		for (u64 chk_idx = 0; chk_idx < BAC_SIZ - 1; chk_idx++) {
+			assert(bid[chk_idx] == ctx->bid_arr[aid_bac + chk_idx],
 				"bid curve mismatch at index %U/%U : expected %d got %d.\n",
-				bac_idx, BAC_SIZ - 1, ctx->bid[aid_bac], bid[bac_idx]
+				chk_idx, BAC_SIZ - 1, ctx->bid_arr[aid_bac + chk_idx], bid[chk_idx]
 			);
-			assert(ask[bac_idx] == ctx->ask[aid_bac + bac_idx],
+			assert(ask[chk_idx] == ctx->ask_arr[aid_bac + chk_idx],
 				"ask curve mismatch at index %U/%U : expected %d got %d.\n",
-				bac_idx, BAC_SIZ - 1, ctx->ask[aid_bac], ask[bac_idx]
+				chk_idx, BAC_SIZ - 1, ctx->ask_arr[aid_bac + chk_idx], ask[chk_idx]
 			);
 		}
+
+		/* Verify the current best bid and ask. */
+		assert(bid[BAC_SIZ - 1] == bst_bid,
+			"bid curve mismatch at index %U/%U : expected %d got %d.\n",
+			BAC_SIZ - 1, BAC_SIZ - 1, bst_bid, bid[BAC_SIZ - 1]
+		);
+		assert(ask[BAC_SIZ - 1] == bst_ask,
+			"ask curve mismatch at index %U/%U : expected %d got %d.\n",
+			BAC_SIZ - 1, BAC_SIZ - 1, bst_ask, ask[BAC_SIZ - 1]
+		);
 
 		/* Cleanup one time out of 10. */
 		if (!itr_idx % 20) {
