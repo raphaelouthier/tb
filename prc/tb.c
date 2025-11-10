@@ -1068,11 +1068,17 @@ typedef struct {
 	/* Updates array. */
 	tb_tst_lv1_upd *upds;
 
-	/* Bid array. */
+	/* Bid array[unt_nbr]. */
 	u64 *bid_arr;
 
 	/* Ask array[unt_nbr]. */
 	u64 *ask_arr;
+
+	/* Bid array for first value of each cell[unt_nbr]. */
+	u64 *bid_ini;
+
+	/* Ask array for first value of each cell[unt_nbr]. */
+	u64 *ask_ini;
 
 	/* Global heatmap [unt_nbr * tim_stp][tck_nbr]. */
 	f64 *hmp;
@@ -1333,6 +1339,9 @@ static inline void _hmp_add(
 #define TCK_TO_PRC(tck_idx, min, stp) \
 	((f64) min + (f64) (stp) * (f64) (tck_idx))
 
+#define PRC_TO_TCK(prc, min, rat) \
+	((u64) (f64) ((prc - (f64) (min)) * (rat)))
+
 #define TCK_PER_UNT 100
 #define TIM_STP 10
 
@@ -1417,6 +1426,8 @@ static inline void _tck_gen(
 	/* Allocate the bid/ask arrays. */
 	ctx->bid_arr = nh_all(unt_nbr * sizeof(u64));
 	ctx->ask_arr = nh_all(unt_nbr * sizeof(u64));
+	ctx->bid_ini = nh_all(unt_nbr * sizeof(u64));
+	ctx->ask_ini = nh_all(unt_nbr * sizeof(u64));
 
 	/* Allocate the heatmap and its initial copy. */
 	const u64 hmp_nbr = unt_nbr * tck_nbr; 
@@ -1425,6 +1436,8 @@ static inline void _tck_gen(
 	ns_mem_rst(ctx->hmp, hmp_nbr * sizeof(f64));
 	ns_mem_rst(ctx->hmp_ini, hmp_nbr * sizeof(f64));
 
+	u64 prv_bst_bid = 0;
+	u64 prv_bst_ask = (u64) -1;
 	{
 		/* Verify that each tick was accounted for, determine
 		 * the current best bid. */
@@ -1445,8 +1458,13 @@ static inline void _tck_gen(
 			}
 		}
 		assert(bst_bid < bst_ask);
+
 		ctx->bid_arr[0] = bst_bid;
 		ctx->ask_arr[0] = bst_ask;
+		ctx->bid_ini[0] = bst_bid;
+		ctx->ask_ini[0] = bst_ask;
+		prv_bst_bid = bst_bid;
+		prv_bst_ask = bst_ask;
 	}
 
 	/* Tick update offsets. */
@@ -1509,6 +1527,7 @@ static inline void _tck_gen(
 		check(tim_cur != 0);
 		const u64 aid_lst = TIM_TO_AID(tim_lst);
 		const u64 aid_prv = TIM_TO_AID(tim_cur - 1);
+		assert(aid_lst <= aid_prv);
 		const u64 aid_cur = TIM_TO_AID(tim_cur);
 		const u64 aid_nxt = TIM_TO_AID(tim_cur + tim_stp);
 		assert(aid_lst < unt_nbr);
@@ -1516,14 +1535,17 @@ static inline void _tck_gen(
 		assert(aid_nxt < unt_nbr);
 		assert(aid_cur < unt_nbr);
 		if (aid_lst != aid_prv) {
-			for (u64 idx = aid_prv + 1; idx <= aid_lst; idx++) {
-				ctx->bid_arr[idx] = ctx->bid_arr[aid_prv];
-				ctx->ask_arr[idx] = ctx->ask_arr[aid_prv];
+			for (u64 idx = aid_lst + 1; idx <= aid_prv; idx++) {
+				ctx->bid_arr[idx] = prv_bst_bid;
+				ctx->ask_arr[idx] = prv_bst_ask;
+				ctx->bid_ini[idx] = prv_bst_bid;
+				ctx->ask_ini[idx] = prv_bst_ask;
 			}
 		}
 		if (aid_prv != aid_cur) {
 			ctx->bid_arr[aid_cur] = 0;
 			ctx->ask_arr[aid_cur] = (u64) -1;
+			ctx
 		}
 		tim_lst = tim_cur;
 
@@ -1565,7 +1587,7 @@ static inline void _tck_gen(
 		}
 		
 		/* Verify that each tick was accounted for, determine
-		 * the current best bid. */
+		 * the current best bid and ask. */
 		{
 			u64 bst_bid = 0;
 			u64 bst_ask = (u64) -1;
@@ -1590,6 +1612,10 @@ static inline void _tck_gen(
 			/* Incorporate the best bid and best ask. */
 			if (ctx->bid_arr[aid_cur] < bst_bid) ctx->bid_arr[aid_cur] = bst_bid;
 			if (ctx->ask_arr[aid_cur] > bst_ask) ctx->ask_arr[aid_cur] = bst_ask;
+			if (aid_cur != aid_prv) {
+				ctx->bid_ini[aid_cur] = bst_bid;
+				ctx->ask_ini[aid_cur] = bst_ask;
+			}
 		}
 
 		/* Update the number of remaining updates. */
@@ -1633,6 +1659,8 @@ static inline void _tck_del(
 	nh_fre(ctx->upds, ctx->upd_max * sizeof(tb_tst_lv1_upd));
 	nh_fre(ctx->bid_arr, ctx->unt_nbr * sizeof(u64));
 	nh_fre(ctx->ask_arr, ctx->unt_nbr * sizeof(u64));
+	nh_fre(ctx->bid_ini, ctx->unt_nbr * sizeof(u64));
+	nh_fre(ctx->ask_ini, ctx->unt_nbr * sizeof(u64));
 	const u64 hmp_nbr = ctx->unt_nbr * ctx->tck_nbr; 
 	nh_fre(ctx->hmp, hmp_nbr * sizeof(f64));
 	nh_fre(ctx->hmp_ini, hmp_nbr * sizeof(f64));
@@ -1784,25 +1812,92 @@ static inline void _tst_lv1(
 	 * alternating bid and ask levels during testing.
 	 */
 
+	/*
+	 * The heatmap of @ctx is only relevant for columns
+	 * with all updates accounted for, which in practice
+	 * comprises all columns except the current one.
+	 * To verify @hst's result for the current column,
+	 * we need arrays giving the current volume for each
+	 * tick, the weighted sum at last update, and the
+	 * time of last update.
+	 */
+	u64 *chc_tims = nh_all(TCK_NBR * sizeof(u64));
+	f64 *chc_sums = nh_all(TCK_NBR * sizeof(f64));
+	f64 *chc_vols = nh_all(TCK_NBR * sizeof(f64));
+	u64 chc_aid = 0;
+
+	/* Current best bid / asks. */
+	u64 bst_bac_aid = 0;
+	u64 bst_bid = ctx->bid_ini[0];
+	u64 bst_ask = ctx->ask_ini[0];
+
+	/* Incorporate into best bid / ask. */
+	#define _bac_add(aid, prc, vol, tim) ({ \
+		const u64 aid_bac = (tim - tim_stt) / cel_dim_tim; \
+		assert(bst_bac_aid <= aid_bac); \ 
+		if (aid_bac != bst_bac_aid) { \
+			bst_bac_aid = aid_bac; \
+			bst_bid = ctx->bid_ini[bst_bac_aid]; \
+			bst_ask = ctx->ask_ini[bst_bac_aid]; \
+		} \
+		if ((vol < 0) && (prc > bst_bid)) { \
+			bst_bid = prc; \
+		} else if ((vol > 0) && (prc < bst_ask)) { \
+			bst_ask = prc; \
+		} \
+	})
+
 	/* Generate and compare the heatmap and bac. */
 	u64 itr_idx = 0;
 	while (tim_cur < tim_end) {
 
-#error TODO INCORPORATE UPDATES IN BID/ASK CURVES.
-#error WE NEED BID_INI AND ASK_INI LIKE WE DID FOR HMP_INI.
+		/* First, insert all orders before the bid-ask time. */
+		u64 i = 0;
+		while (bac_idx < upd_nb) {
+			const u64 tim = upds[bac_idx].tim; 
+			if (tim > bac_tim) break;
+
+			/* Add. */
+			tims[i] = tim;
+			const f64 prc = prcs[i] = upds[bac_idx].val;
+			const f64 vol = vols[i] = upds[bac_idx].vol;
+
+			/* Incorporate in best bid / ask. */
+			_bac_add(prc, vol, tim);
+
+			bac_idx++;
+			i++;
+
+
+			/* If buffer full, flush. */
+			if (i == 2 * TCK_NB) {
+				tb_lv1_add(hst, i, tims, prcs, vols);
+				i = 0;
+			}
+
+		}
+
+		/* Add all non-flushed updates. */
+		if (i) {
+			tb_lv1_add(hst, i, tims, prcs, vols);
+		}
 		
 		/* Add the required number of updates, keep track of the bac time. */
-		const u64 bac_prv;
 		const u64 add_nb = add_stps[itr_idx % STP_NB];
 		assert(bac_idx + 1 < upd_nb);
 		assert(bac_tim < upds[bac_idx + 1].tim); 
-		u64 i = 0;
+		i = 0;
 		for (; (i < add_nb) && (bac_idx < upd_nb); (i++), (bac_idx++)) {
-			prcs[i] = upds[bac_idx].val;
-			vols[i] = upds[bac_idx].vol;
-			const u64 tim_nxt = tims[i] = upds[bac_idx].tim;
-			assert(tim_bac <= tim_nxt);
-			#error TODO INCORPORATE INTO BID_ASK.
+
+			/* Add. */
+			const f64 prc = prcs[i] = upds[bac_idx].val;
+			const f64 vol = vols[i] = upds[bac_idx].vol;
+			const u64 tim = tims[i] = upds[bac_idx].tim;
+			assert(tim_bac <= tim);
+			tim_bac = tim;
+
+			/* Incorporate in best bid / ask. */
+			_bac_add(prc, vol, tim);
 		}
 
 		/* Add all updates. */
@@ -1811,13 +1906,18 @@ static inline void _tst_lv1(
 		/* Also add all successor updates at the same time. */
 		i = 0;
 		while (bac_idx < upd_nb) {
-			const u64 tim_nxt = upds[bac_idx].tim; 
-			assert(tim_bac <= tim_nxt)
-			if (tim_bac != tim_nxt) break;
-			tims[i] = tim_nxt;
-			prcs[i] = upds[bac_idx].val;
-			vols[i] = upds[bac_idx].vol;
-			#error TODO INCORPORATE INTO BID_ASK.
+			const u64 tim = upds[bac_idx].tim; 
+			assert(tim_bac <= tim)
+			if (tim_bac != tim) break;
+
+			/* Add. */
+			tims[i] = tim;
+			const f64 prc = prcs[i] = upds[bac_idx].val;
+			const f64 vol = vols[i] = upds[bac_idx].vol;
+
+			/* Incorporate in best bid / ask. */
+			_bac_add(prc, vol, tim);
+
 			bac_idx++;
 			i++;
 		}
@@ -1837,30 +1937,102 @@ static inline void _tst_lv1(
 		tim_cln = tim_cur - HMP_DIM_TIM * cel_dim_tim;
 
 		/* Incorporate all orders < current time in the
-		 * heatmap. */
+		 * heatmap data. */
 		while (1) {
-			const u64 tim_nxt = upds[cur_idx].tim; 
-			if (tim_nxt >= tim_cur) break;
-			#error TODO INCORPORATE INTO HEATMAP.
+
+			/* Check. */
+			const u64 tim = upds[cur_idx].tim; 
+			if (tim >= tim_cur) break;
+
+			/* Read. */
+			const f64 val = upds[cur_idx].val; 
+			const f64 vol = upds[cur_idx].vol; 
+			const u64 tck = PRC_TO_TCK(val, PRC_MIN, TCK_RAT); 
+
+			/* Incorporate. */
+			const u64 aid = (tim - tim_stt) / cel_dim_tim;
+			assert(aid >= chc_aid);
+			if (aid != aid_chc) {
+				u64 aid_tim = aid * cel_dim_tim + tim_stt;
+				for (u32 i = 0; i < TCK_NBR; i++) {
+					chc_tims[i] = aid_tim;
+					chc_avgs[i] = 0;
+				}
+			}
+			assert(tim >= chk_tims[tck]);
+			if (tim != chk_tims[tck]) {
+				chk_avgs[i] += (f64) (tim - chk_tims[tck]) * vol;
+			}
+			chc_vols[tck] = vol;
+			chc_tims[tck] = tim;
+
+			/* Increment. */
 			cur_idx++;
-
-		}
-		const u64 bac_prv;
-		const u64 add_nb = add_stps[itr_idx % STP_NB];
-		assert(bac_idx + 1 < upd_nb);
-		assert(bac_tim < upds[bac_idx + 1].tim); 
-		u64 i = 0;
-		for (; (i < add_nb) && (bac_idx < upd_nb); (i++), (bac_idx++)) {
-			prcs[i] = upds[bac_idx].val;
-			vols[i] = upds[bac_idx].vol;
-			const u64 tim_nxt = tims[i] = upds[bac_idx].tim;
-			assert(tim_bac <= tim_nxt);
 		}
 
-		/* Verify the heatmap. */
-#error TODO.
+		/* Determine the heatmap anchor point. */
+		assert(hst->hmp_tck_max == hst->hmp_tck_min + HMP_DIM_TCK);
+		const u64 src_off = hst->hmp_tck_min;
 
-		/* Verify bid-ask curves. */
+		/* Verify all heatmap columns except the current
+		 * against the reference. */
+		assert(!(tim_stt % cel_dim_tim));
+		assert(tim_cur >= tim_stt);
+		const u64 aid_bac = (tim_cur + cel_dim_tim - 1 - tim_stt) / cel_dim_tim;
+		const s64 aid_hmp = aid_bac - HMP_DIM_TIM;  
+		const f64 *hmp = tb_lv1_hmp(hst);
+		for (u64 i = 0; i < HMP_DIM_TIM - 1; i++) {
+			s64 col_idx = aid_hmp + i; 
+
+			/* If column is before start point, it must be equal
+			 * to the history's reset prices.
+			 * If not, it must be equal to the actual history prices. */
+			const u64 src_idx = (col_idx < 0) ? 0 : (u64) col_idx;
+			const f64 *src = (col_idx < 0) ? ctx->hmp_ini : ctx->hmp;
+			const f64 *src_cmp = src + src_idx * TCK_NBR + src_off;
+			const f64 *hmp_cmp = hmp + col_idx * HMP_DIM_TCK;
+
+			/* Compare. */
+			for (u64 row_idx = 0; row_idx < HMP_DIM_TCK; row_idx++) {
+				assert(hmp_cmp[row_idx] == src_cmp[row_idx],
+					"heatmap mismatch at column %U/%U row %U/%U (tick %U/%U) : expected %d got %d.\n",
+					col_idx, HMP_DIM_TIM - 1, row_idx, HMP_DIM_TCK, row_idx + src_off, TCK_NBR,  
+					src_cmp[row_idx], hmp_cmp[row_idx]
+				);
+			}
+
+		}
+
+		/* Verify the heatmap current column agains the
+		 * currently updated column. */
+		const f64 *hmp_cmp = hmp + (HMP_DIM_TIM - 1) * HMP_DIM_TCK;
+		const u64 div = (tim_cur - tim_stt) % cel_dim_tim;
+		for (u64 row_idx = 0; row_idx < HMP_DIM_TCK; row_idx++) {
+			assert(tim_cur >= chc_tims[row_idx]);
+			const f64 avg = (div) ? 
+				(chc_sums[row_idx] + (tim_cur - chc_tims[row_idx]) * chc_vols[row_idx]) / (f64) div :
+				chc_vols[row_idx];
+
+			assert(hmp_cmp[row_idx] == avg,
+				"heatmap mismatch at current column row %U/%U (tick %U/%U) : expected %d got %d.\n",
+				GMP_DIM_TIM - 1, HMP_DIM_TIM - 1, row_idx, HMP_DIM_TCK, row_idx + lst_off, TCK_NBR,  
+				avg, hmp_cmp[row_idx]
+			);
+		}
+
+		/* Verify all values of the bid-ask curves except the current one. */
+		const f64 *bid = tb_lv1_bid(hst);
+		const f64 *ask = tb_lv1_ask(hst);
+		for (u64 bac_idx = 0; bac_idx < BAC_SIZ - 1; bac_idx++) {
+			assert(bid[bac_idx] == ctx->bid[aid_bac + bac_idx],
+				"bid curve mismatch at index %U/%U : expected %d got %d.\n",
+				bac_idx, BAC_SIZ - 1, ctx->bid[aid_bac], bid[bac_idx]
+			);
+			assert(ask[bac_idx] == ctx->ask[aid_bac + bac_idx],
+				"ask curve mismatch at index %U/%U : expected %d got %d.\n",
+				bac_idx, BAC_SIZ - 1, ctx->ask[aid_bac], ask[bac_idx]
+			);
+		}
 
 		/* Cleanup one time out of 10. */
 		if (!itr_idx % 20) {
@@ -1873,6 +2045,9 @@ static inline void _tst_lv1(
 	nh_fre(tims, 2 * TCK_NBR * sizeof(u64));
 	nh_fre(prcs, 2 * TCK_NBR * sizeof(f64));
 	nh_fre(vols, 2 * TCK_NBR * sizeof(f64));
+	nh_fre(chc_tims, TCK_NBR * sizeof(u64));
+	nh_fre(chc_sums, TCK_NBR * sizeof(f64));
+	nh_fre(chc_vols, TCK_NBR * sizeof(f64));
 
 	/* Delete the history. */
 	tb_lv1_dtr(hst);

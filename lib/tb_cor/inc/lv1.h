@@ -152,7 +152,7 @@ struct tb_lv1_hst {
 	/* Heatmap number of columns. */
 	u64 hmp_dim_tim;
 
-	/* Heatmap number of columns. Must be even. */
+	/* Heatmap number of rows. Must be even. */
 	u64 hmp_dim_tck;
 
 	/* Heatmap time (x) cell width is the time anchor. */

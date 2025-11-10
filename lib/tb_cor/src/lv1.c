@@ -811,7 +811,7 @@ void tb_lv1_prp(
 
 	/* Determine the new hashmap end time. */ 
 	const u64 tim_res = hst->tim_res;
-	const u64 tim_hmp_new = _to_hmp_end_tim(hst, tim_cur);/* TODO = (align up to anchor) */
+	const u64 tim_hmp_new = _to_hmp_end_tim(hst, tim_cur);
 	const u64 tim_hmp_prv = hst->tim_hmp;
 	assert(!(tim_hmp_new % tim_res));
 	assert(!(tim_hmp_prv % tim_res));
@@ -1013,6 +1013,7 @@ void tb_lv1_prc(
 		hst->hmp_tck_max = hmp_tck_cur_max = tck_ref_new - hmp_tck_hln;
 
 	}
+	check(hst->hmp_tck_max == hst->hmp_tck_min + hst->hmp_dim_tck);
 
 	/* Iterate over all ticks (decreasing order). */
 	tb_lv1_tck *tck = ns_map_sch_gs(&hst->tcks, hmp_tck_cur_min, u64, tb_lv1_tck, tcks); 
