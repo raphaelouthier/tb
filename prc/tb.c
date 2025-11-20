@@ -1221,7 +1221,7 @@ static inline void _obk_upd(
 	gen_sed = ns_hsh_mas_gen(gen_sed);
 
 	/* Reset the orderbook if required. */ 
-	if (!(gen_idx % ctx->obk_rst_prd)) {
+	if (gen_idx && (!(gen_idx % ctx->obk_rst_prd))) {
 		for (u64 idx = tck_min; idx < tck_max; idx++) {
 			OBK(idx) = 0;
 		}
@@ -1258,6 +1258,9 @@ static inline void _obk_upd(
 		gen_sed = ns_hsh_mas_gen(gen_sed);
 	}
 
+	/* Skip resets if first iteration. */
+	if (!gen_idx) goto end;
+
 	static u64 exc_stps[3] = {
 		100,
 		200,
@@ -1289,14 +1292,14 @@ static inline void _obk_upd(
 		51
 	};
 	/* Apply resets on the whole orderbook. */
-	if (!(gen_idx % ctx->obk_ask_rst_prd)) {
+	if (gen_idx && !(gen_idx % ctx->obk_ask_rst_prd)) {
 		const u64 stp = rst_stps[(gen_idx / ctx->obk_ask_rst_prd) % 3];
 		for (u64 idx = tck_cur; (idx += stp) < tck_max;) {
 			OBK(idx) = 0;
 		}	
 		gen_sed = ns_hsh_mas_gen(gen_sed);
 	}
-	if (!(gen_idx % ctx->obk_bid_rst_prd)) {
+	if (gen_idx && !(gen_idx % ctx->obk_bid_rst_prd)) {
 		const u64 stp = rst_stps[(gen_idx / ctx->obk_bid_rst_prd) % 3];
 		for (u64 idx = tck_cur; tck_min <= (idx -= stp);) {
 			OBK(idx) = 0;
@@ -1435,6 +1438,10 @@ static inline void _tck_gen(
 	ctx->hmp_ini = nh_all(hmp_nbr * sizeof(f64));
 	ns_mem_rst(ctx->hmp, hmp_nbr * sizeof(f64));
 	ns_mem_rst(ctx->hmp_ini, hmp_nbr * sizeof(f64));
+
+	/* The first row of the hashmap init is never set by
+	 * hmp_add. Do it now. */
+	ns_mem_cpy(ctx->hmp_ini, obk_cur, obk_siz);
 
 	u64 prv_bst_bid = 0;
 	u64 prv_bst_ask = (u64) -1;
@@ -1700,7 +1707,7 @@ static inline void _tst_lv1(
 	/* Generation parameters. */
 	#define TIM_INC 1000000
 	#define UNT_NBR 1000
-	#define TCK_NBR 1024
+	#define TCK_NBR 39
 	#define PRC_MIN 10000
 	#define HMP_DIM_TCK 100
 	#define HMP_DIM_TIM 100
@@ -1746,7 +1753,7 @@ static inline void _tst_lv1(
 	f64 *vols = nh_all(2 * TCK_NBR * sizeof(f64));
 
 	/* Export tick data. */
-	_tck_exp(ctx);
+	//_tck_exp(ctx);
 
 	/*
 	 * Create a reconstructor covering a 
@@ -1762,17 +1769,24 @@ static inline void _tst_lv1(
 	);
 
 	/* Set initial prices in groups of 19 by step of 19. */
-	assert(TCK_NBR & 19);
+	assert(TCK_NBR % 19);
 	assert(19 % TCK_NBR);
+	u64 ttl_non_nul = 0;
 	for (u32 i = 0; i < TCK_NBR;) {
-		u32 j = 0;
-		for (; (j < 19) && (i < TCK_NBR); i++, j++) {
+		u64 nb_non_nul = 0;
+		for (u32 j = 0; (j < 19) && (i < TCK_NBR); i++, j++) {
 			u32 ri = (19 * i) % TCK_NBR;
-			prcs[j] = TCK_TO_PRC(ri, PRC_MIN, prc_stp); 
-			vols[j] = ctx->hmp_ini[ri];
+			const f64 vol = ctx->hmp_ini[ri];
+			if (!vol) continue;
+			prcs[nb_non_nul] = TCK_TO_PRC(ri, PRC_MIN, prc_stp); 
+			assert(prcs[nb_non_nul]);
+			vols[nb_non_nul] = ctx->hmp_ini[ri];
+			nb_non_nul++;
 		}
-		tb_lv1_add(hst, 19, 0, prcs, vols);
+		if (nb_non_nul) tb_lv1_add(hst, nb_non_nul, 0, prcs, vols);
+		ttl_non_nul += nb_non_nul;
 	}
+	assert(ttl_non_nul, "init with no volume.\n");
 
 	#define STP_NB 24
 	static u64 add_stps[STP_NB] = {

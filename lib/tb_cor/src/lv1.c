@@ -870,7 +870,7 @@ void tb_lv1_add(
 	assert(upd_nb);
 
 	/* Require a prepared history. */
-	assert(hst->tim_cur);
+	assert((!hst->tim_cur) == (!tims));
 
 	/* Add all updates. */
 	const u8 ini = (!tims);
@@ -887,7 +887,7 @@ void tb_lv1_add(
 	
 		/* Ensure time is monotonic and in prepared range. */
 		assert(tim_max <= tim);
-		assert(tim < tim_end);
+		assert((tim < tim_end) || ((!tim) && (!tim_end)));
 		tim_max = tim;
 
 		/* Get or create the corresponding tick level.
