@@ -1779,6 +1779,7 @@ static inline void _tst_lv1(
 			const f64 vol = ctx->hmp_ini[ri];
 			if (!vol) continue;
 			prcs[nb_non_nul] = TCK_TO_PRC(ri, PRC_MIN, prc_stp); 
+			debug("%U %d.\n", ri, prcs[nb_non_nul]); 
 			assert(prcs[nb_non_nul]);
 			vols[nb_non_nul] = ctx->hmp_ini[ri];
 			nb_non_nul++;
@@ -1864,8 +1865,11 @@ static inline void _tst_lv1(
 	u64 itr_idx = 0;
 	while (tim_cur < tim_end) {
 
+		debug("ITR %U\n", itr_idx);
+
 		/* First, insert all orders before the bid-ask time. */
 		u64 i = 0;
+		u8 prp = 0;
 		while (bac_idx < upd_nb) {
 			const u64 tim = upds[bac_idx].tim; 
 			if (tim > tim_bac) break;
@@ -1885,6 +1889,7 @@ static inline void _tst_lv1(
 
 			/* If buffer full, flush. */
 			if (i == 2 * TCK_NBR) {
+				tb_lv1_prp(hst, tim_bac);
 				tb_lv1_add(hst, i, tims, prcs, vols);
 				i = 0;
 			}
@@ -1893,6 +1898,7 @@ static inline void _tst_lv1(
 
 		/* Add all non-flushed updates. */
 		if (i) {
+			tb_lv1_prp(hst, tim_bac);
 			tb_lv1_add(hst, i, tims, prcs, vols);
 		}
 		

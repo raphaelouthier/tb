@@ -258,7 +258,7 @@ struct tb_lv1_hst {
  */
 tb_lv1_hst *tb_lv1_ctr(
 	u64 tim_res,
-	f64 prc_res,
+	u64 prc_res,
 	u64 hmp_dim_tck,
 	u64 hmp_dim_tim,
 	u64 bac_nb
