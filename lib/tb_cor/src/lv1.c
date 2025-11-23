@@ -2,6 +2,12 @@
 
 #include <tb_cor/tb_cor.all.h>
 
+/*******
+ * Log *
+ *******/
+
+tb_lib_log_def(cor, lv1);
+
 /*******************
  * Bid / ask utils *
  *******************/
@@ -70,67 +76,85 @@ static inline u64 _to_hmp_end_tim(
  ********************/
 
 /*
+ * Invalidate either a current or max best bid/ask.
+ */
+#define BAS_INV(tck, vol_nam, bst_bid_nam, bst_ask_nam) \
+\
+	/* No consecutive invalidations. */ \
+	check(!inv); \
+\
+	/* Determine if @tck is the best bid or ask
+	 * at the specified time.
+	 * If best bid, search for the first lower price 
+	 * level with a non-null volume. */ \
+	if (tck == prv_bst_bid) { \
+		tb_lv1_tck *oth = tck; \
+		bid_upd = 1; \
+		while (1) { \
+			ns_mapn_u64 *prv = ns_map_u64_fn_inr(&oth->tcks); \
+			if (!prv) { \
+				hst->bst_bid_nam = 0; \
+				break; \
+			} \
+			oth = ns_cnt_of(prv, tb_lv1_tck, tcks); \
+			if (oth->vol_nam > 0) { \
+				debug("warning : found an ask price below the previous best bid price.\n"); \
+			} \
+			if (oth->vol_nam < 0) { \
+				hst->bst_bid_nam = oth; \
+				break; \
+			} \
+		} \
+	} \
+\
+	/* If best ask, search for the first upper price 
+	 * level with a non-null volume. */  \
+	else if (tck == prv_bst_ask) { \
+		tb_lv1_tck *oth = tck; \
+		ask_upd = 1; \
+		while (1) { \
+			ns_mapn_u64 *nxt = ns_map_u64_fn_in(&oth->tcks); \
+			if (!nxt) { \
+				hst->bst_ask_nam = 0; \
+				break; \
+			} \
+			oth = ns_cnt_of(nxt, tb_lv1_tck, tcks); \
+			if (oth->vol_nam < 0) { \
+				debug("warning : found a bid price above the previous best ask price.\n"); \
+			} \
+			if (oth->vol_nam > 0) { \
+				hst->bst_ask_nam = oth; \
+				break; \
+			} \
+		} \
+	} \
+	inv = 1;
+
+/*
  * Generate the code to update the best bid/ask spread
  * at a specified time.
  */
-#define BAS_UPD(vol_nam, bst_bid_nam, bst_ask_nam) \
-	/* Read the volume at the specified time. */ \
+#define BAS_UPD(tck, vol_nam, bst_bid_nam, bst_ask_nam) \
+\
+	/* Read the volume at the specified time, read
+	 * best bis/ask. @tck which was just modified could
+	 * have been a previous best so we cannot yet
+	 * make checks on their state. */ \
 	const f64 vol = tck->vol_nam; \
 	tb_lv1_tck *const prv_bst_bid = hst->bst_bid_nam; \
 	tb_lv1_tck *const prv_bst_ask = hst->bst_ask_nam; \
+	check((prv_bst_bid != prv_bst_ask) || (prv_bst_bid == 0)); \
 	_unused_ u8 bid_upd = 0; \
 	_unused_ u8 ask_upd = 0; \
 \
-	/* If @tck's volume is null, complex case. */ \
+	/* Invalidation flags. */ \
+	u8 inv = 0; \
+\
+	/* If @tck's volume is null, just invalidate it. */ \
 	if (vol == 0) { \
-		debug("pong.\n"); \
-\
-		/* Determine if @tck is the best bid or ask \
-		 * at the specified time. */ \
-		check((prv_bst_bid != prv_bst_ask) || (prv_bst_bid == 0)); \
-\
-		/* If best bid, search for the first lower price 
-		 * level with a non-null volume. */  \
-		if (tck == prv_bst_bid) { \
-			bid_upd = 1; \
-			while (1) { \
-				ns_mapn_u64 *prv = ns_map_u64_fn_inr(&tck->tcks); \
-				if (!prv) { \
-					hst->bst_bid_nam = 0; \
-					break; \
-				} \
-				tck = ns_cnt_of(prv, tb_lv1_tck, tcks); \
-				if (tck->vol_nam > 0) { \
-					debug("warning : found an ask price below the previous best bid price.\n"); \
-				} \
-				if (tck->vol_nam < 0) { \
-					hst->bst_bid_nam = tck; \
-					break; \
-				} \
-			} \
-		} \
-\
-		/* If best ask, search for the first upper price 
-		 * level with a non-null volume. */  \
-		else if (tck == prv_bst_ask) { \
-			ask_upd = 1; \
-			while (1) { \
-				ns_mapn_u64 *nxt = ns_map_u64_fn_in(&tck->tcks); \
-				if (!nxt) { \
-					hst->bst_ask_nam = 0; \
-					break; \
-				} \
-				tck = ns_cnt_of(nxt, tb_lv1_tck, tcks); \
-				if (tck->vol_nam < 0) { \
-					debug("warning : found a bid price above the previous best ask price.\n"); \
-				} \
-				if (tck->vol_nam > 0) { \
-					hst->bst_ask_nam = tck; \
-					break; \
-				} \
-			} \
-		} \
-\
+		BAS_INV(tck, vol_nam, bst_bid_nam, bst_ask_nam); \
+		check(1 && ((hst->bst_bid_nam == 0) || (hst->bst_bid_nam->vol_nam < 0))); \
+		check(2 && ((hst->bst_ask_nam == 0) || (hst->bst_ask_nam->vol_nam > 0))); \
 		check((hst->bst_bid_nam != hst->bst_ask_nam) || (hst->bst_bid_nam == 0)); \
 \
 	} \
@@ -138,16 +162,25 @@ static inline u64 _to_hmp_end_tim(
 	/* If not a null volume, just select as new best bid \
 	 * or ask if relevant. */ \
 	else { \
-		debug("ping.\n"); \
 \
 		/* Determine if bid or ask, read the tick. */ \
 		const u8 is_ask = _is_ask(vol); \
+		debug("typ %d %s.\n", vol, is_ask ? "ask" : "bid"); \
 		const u64 tck_val = tck->tcks.val; \
 \
-		/* If bid, if price is superior to best 
-		 * bid, select as best bid. */ \
+		/* If is bid but was best ask, or
+		 * if is ask but was best bid, invalidate. */ \
+		if ( \
+			(is_ask || (tck == hst->bst_bid_nam)) || \
+			((!is_ask) || (tck == hst->bst_ask_nam)) \
+		) { \
+			BAS_INV(tck, vol_nam, bst_bid_nam, bst_ask_nam); \
+		} \
+\
+		/* If bid, if price is superior to best bid, select as best bid. */ \
 		if (!is_ask) { \
 			if ((!prv_bst_bid) || (prv_bst_bid->tcks.val < tck_val)) { \
+				debug("bst %p "#bst_bid_nam" %U %d.\n", tck, tck->tcks.val, tck->vol_nam); \
 				bid_upd = 1; \
 				hst->bst_bid_nam = tck; \
 			} \
@@ -157,12 +190,15 @@ static inline u64 _to_hmp_end_tim(
 		 * ask, select as best ask. */ \
 		else { \
 			if ((!prv_bst_ask) || (prv_bst_ask->tcks.val > tck_val)) { \
+				debug("bst %p "#bst_ask_nam" %U %d.\n", tck, tck->tcks.val, tck->vol_nam); \
 				ask_upd = 1; \
 				hst->bst_ask_nam = tck; \
 			} \
 		} \
 \
 		/* We should not find both bid and ask null (hence not equal). */ \
+		check(3 && ((hst->bst_bid_nam == 0) || (hst->bst_bid_nam->vol_nam < 0))); \
+		check(4 && ((hst->bst_ask_nam == 0) || (hst->bst_ask_nam->vol_nam > 0))); \
 		check(hst->bst_bid_nam != hst->bst_ask_nam); \
 \
 	}
@@ -176,7 +212,7 @@ static inline void _hst_bas_cur_upd(
 	tb_lv1_tck *tck
 )
 {
-	BAS_UPD(vol_cur, bst_cur_bid, bst_cur_ask);
+	BAS_UPD(tck, vol_cur, bst_cur_bid, bst_cur_ask);
 }
 
 /*
@@ -191,27 +227,51 @@ static inline void _hst_bas_max_upd(
 
 	/* First, update the max best bid and ask prices. */
 	assert(hst->bac_nb);
-	BAS_UPD(vol_max, bst_max_bid, bst_max_ask);
+	BAS_UPD(tck, vol_max, bst_max_bid, bst_max_ask);
+
+	/* Verify that the update logic makes sense. */
+	check(bid_upd == (prv_bst_bid != hst->bst_max_bid));
+	check(ask_upd == (prv_bst_ask != hst->bst_max_ask));
+
+	/*
+	 * When we add initial orders, there is a window
+	 * where we add orders before the bid-ask curves.
+	 * In this case, we have nothing to update in the
+	 * bid-ask curves.
+	 * Just ensure that during init, max and current
+	 * bests are the same.
+	 */ 
+	const u64 tck_tim = tck->tim_max; 
+	if (!tck_tim) {
+		assert(hst->bst_max_bid == hst->bst_cur_bid);
+		assert(hst->bst_max_ask == hst->bst_cur_ask);
+		return;
+	}
+	const u64 tim_res = hst->tim_res;
+	const u64 bac_aid = hst->bac_aid;
+	const u64 bid_aid = hst->bid_aid;
+	const u64 ask_aid = hst->ask_aid;
+	const u64 prp_aid = (tck_tim - 1) / tim_res;
+	const u64 new_aid = tck_tim / tim_res; 
+	check(prp_aid <= new_aid);
+	check(bid_aid <= new_aid);
+	check(ask_aid <= new_aid);
+	check((new_aid < bac_aid) || (new_aid - bac_aid) < hst->bac_nb);
+	check((prp_aid < bac_aid) || (prp_aid - bac_aid) < hst->bac_nb);
+	check(bid_aid < bid_aid + 1);
+	check(ask_aid < ask_aid + 1);
+	if (new_aid < bac_aid) {
+		return;
+	}
 
 	/*
 	 * If any change in best bid or ask, we need to update
 	 * the bid / ask curves.
 	 */
-	check(!(bid_upd && ask_upd));
-	check(bid_upd == (prv_bst_bid != hst->bst_max_bid));
-	check(ask_upd == (prv_bst_ask != hst->bst_max_ask));
 
 	/* If no bid or ask update, complete. */
 	if (!(bid_upd || ask_upd)) return;
-	const u64 tim_res = hst->tim_res;
-	const u64 bac_aid = hst->bac_aid;
-	const u64 bid_aid = hst->bid_aid;
-	const u64 ask_aid = hst->ask_aid;
-	const u64 prp_aid = tck->tim_max ? ((tck->tim_max - 1) / tim_res) : 0; 
-	const u64 new_aid = tck->tim_max / tim_res; 
-	check(prp_aid <= new_aid);
-	check(bid_aid <= prp_aid);
-	check(ask_aid <= prp_aid);
+	check(bac_aid <= new_aid);
 	u64 *const bid_crv = hst->bid_crv;
 	u64 *const ask_crv = hst->ask_crv;
 
@@ -223,8 +283,9 @@ static inline void _hst_bas_max_upd(
 		/* Propagate previous best value until max time - 1. */
 		if (bac_aid <= prp_aid) {
 			const u64 prp_val = _bst_bid_val(prv_bst_bid);
-			const u64 stt_aid = (bac_aid < bid_aid) ? bid_aid : bac_aid;
+			const u64 stt_aid = (bac_aid < (bid_aid + 1)) ? (bid_aid + 1) : bac_aid;
 			for (u64 aid = stt_aid; aid <= prp_aid; aid++) {
+				check(aid >= bac_aid);
 				bid_crv[aid - bac_aid] = prp_val;
 			}	
 		}
@@ -237,7 +298,6 @@ static inline void _hst_bas_max_upd(
 		 * the new value. */
 		const u64 cel_bst = bid_crv[new_aid - bac_aid];
 		const u64 crt_bst = _bst_bid_val(hst->bst_max_bid);
-		check((cel_bst == (u64) -1) == (prp_aid != new_aid));
 		if (
 			(prp_aid != new_aid) ||
 			(cel_bst < crt_bst)
@@ -258,8 +318,9 @@ static inline void _hst_bas_max_upd(
 		/* Propagate previous best value until max time - 1. */
 		if (bac_aid <= prp_aid) {
 			const u64 prp_val = _bst_ask_val(prv_bst_ask);
-			const u64 stt_aid = (bac_aid < ask_aid) ? ask_aid : bac_aid;
+			const u64 stt_aid = (bac_aid < (ask_aid + 1)) ? (ask_aid + 1) : bac_aid;
 			for (u64 aid = stt_aid; aid <= prp_aid; aid++) {
+				check(aid >= bac_aid);
 				ask_crv[aid - bac_aid] = prp_val;
 			}	
 		}
@@ -272,8 +333,7 @@ static inline void _hst_bas_max_upd(
 		 * the new value. */
 		const u64 cel_bst = ask_crv[new_aid - bac_aid];
 		const u64 crt_bst = _bst_ask_val(hst->bst_max_ask);
-		check((!(cel_bst == (u64) -1)) || ((prp_aid != new_aid) || (tck->tim_max == 0)));
-		check(((cel_bst == (u64) -1) || (cel_bst > crt_bst)) == (cel_bst > crt_bst));
+		check(((cel_bst == (u64) -1) || (cel_bst >= crt_bst)) == (cel_bst >= crt_bst));
 		if ((cel_bst > crt_bst)) {
 			ask_crv[new_aid - bac_aid] = crt_bst;
 		}
@@ -300,31 +360,43 @@ static inline void _hst_bac_mov(
 )
 {
 	assert(shf);
-	assert(hst->bac_nb);
+	
 
 	/* If no bid / ask curve, nothing to do. */
 	const u64 len = hst->bac_nb; 
-	if (!len) return;
+	assert(len);
+
+	tb_lv1_log("bac_mov : %U -> %U.\n", hst->bac_aid, hst->bac_aid + shf);
 
 	/* Determine move attributes. */	
 	const u8 ovf = (shf >= len);
-	const u64 rem_nb = ovf ? 0 : len - shf;
+	const u64 shf_bnd = ovf ? len : shf;
+	if (ovf) {
+		tb_lv1_log("bac_mov : ovf : %U >= %U.\n", shf, len);
+	}
 
 	/* Move old bac elements. */
 	u64 *const bid_crv = hst->bid_crv;
 	u64 *const ask_crv = hst->ask_crv;
-	if (rem_nb) {
-		ns_mem_cpy(bid_crv, bid_crv + shf, rem_nb * sizeof(u64));
-		ns_mem_cpy(ask_crv, ask_crv + shf, rem_nb * sizeof(u64));
+	check(shf_bnd <= len);
+	if (shf_bnd < len) {
+		const u64 cpy_nb = len - shf_bnd;
+		tb_lv1_log("bac_mov : cpy : [%U, %U[ -> [0, %U[.\n", shf_bnd, shf_bnd + cpy_nb, cpy_nb);
+		ns_mem_cpy(bid_crv, bid_crv + shf_bnd, cpy_nb * sizeof(u64));
+		ns_mem_cpy(ask_crv, ask_crv + shf_bnd, cpy_nb * sizeof(u64));
 	}
 
 	/* Set new values to -1 in debug mode. */
 	#ifdef DEBUG
-	ns_mem_set(bid_crv + len - shf, 0xff, shf * sizeof(u64)); 
-	ns_mem_set(ask_crv + len - shf, 0xff, shf * sizeof(u64)); 
-	check(((u64 *) bid_crv)[len - shf] == (u64) -1);
-	check(((u64 *) ask_crv)[len - shf] == (u64) -1);
+	tb_lv1_log("bac_mov : rst : [%U, %U[.\n", len - shf_bnd, shf_bnd);
+	ns_mem_set(bid_crv + len - shf_bnd, 0xff, shf_bnd * sizeof(u64)); 
+	ns_mem_set(ask_crv + len - shf_bnd, 0xff, shf_bnd * sizeof(u64)); 
+	check(((u64 *) bid_crv)[len - shf_bnd] == (u64) -1);
+	check(((u64 *) ask_crv)[len - shf_bnd] == (u64) -1);
 	#endif
+
+	/* Report the new start of the bid ask curve. */
+	SAFE_ADD(hst->bac_aid, shf);
 
 }
 
@@ -443,7 +515,7 @@ static inline void _hmp_wrt_row(
 
 	/* If no data, just write the current volume. */
 	if (!upd) {
-		for (u64 col_id = hst->hmp_dim_tim; (col_id--), wrt_nb--;) {
+		for (u64 col_id = hst->hmp_dim_tim; (col_id--) && wrt_nb--;) {
 			HMP_LOC(col_id, row_id) = vol_cur;	
 		}
 		return;
@@ -455,7 +527,7 @@ static inline void _hmp_wrt_row(
 	check(!(hst->hmp_tim_spn % tim_res)); 
 	const u64 aid_hmp = (hst->tim_hmp - hst->hmp_tim_spn) / tim_res;  
 	u64 aid_upd = upd->tim / tim_res;
-	for (u64 col_id = hst->hmp_dim_tim; (col_id--), wrt_nb--;) {
+	for (u64 col_id = hst->hmp_dim_tim; (col_id--) && wrt_nb--;) {
 		check((upd) || (vol_stt == vol_cur));
 
 		/* If no update anymore, just write the start volume. */
@@ -562,7 +634,6 @@ static inline tb_lv1_tck *_tck_get(
 {
 
 	/* Search. */
-	debug("GET %U.\n", val);
 	tb_lv1_tck *tck = ns_map_sch(&hst->tcks, val, u64, tb_lv1_tck, tcks); 
 
 	/* If found, forward. */
@@ -658,6 +729,7 @@ static inline tb_lv1_upd *_upd_ctr(
  * It must be @hst's oldest update.
  * If its tick has no more updates and a current volume
  * of 0, delete it as well.
+ * Callable from cleanup only.
  */
 static inline void _upd_dtr(
 	tb_lv1_hst *hst,
@@ -670,21 +742,21 @@ static inline void _upd_dtr(
 	/* Remove from price list. */
 	tb_lv1_tck *tck = upd->tck;
 	check(!ns_dls_empty(&tck->upds_tck));
-	check(tck->upds_tck.next == &tck->upds_tck);
+	check(upd->upds_tck.prev == &tck->upds_tck);
 	check(!ns_dls_empty(&upd->upds_tck));
 	ns_dls_rmu(&upd->upds_tck);
+	assert(ns_slsh_pull(&hst->upds_hst) == &upd->upds_hst);
 	tck->vol_stt = upd->vol;
 	nh_fre_(upd);
 
-	/* If the price has no more updates and a volume
-	 * of 0, delete it. */
-	if (tck->tim_max <= hmp_stt) {
-		check(ns_dls_empty(&tck->upds_tck));
-		check(tck->vol_stt == tck->vol_cur);
-		check(tck->vol_stt == tck->vol_max);
-		if (tck->vol_stt == 0) {
-			_tck_dtr(hst, tck);
-		}
+	/* If the tick is past its max time, has no more updates,
+	 * and a resting volume of 0, delete it. */
+	if (
+		(tck->tim_max <= hmp_stt) &&
+		(ns_dls_empty(&tck->upds_tck)) &&
+		(tck->vol_stt == 0)
+	) {
+		_tck_dtr(hst, tck);
 	}
 
 }
@@ -734,6 +806,7 @@ tb_lv1_hst *tb_lv1_ctr(
 	hst->tim_hmp = 0;
 	hst->tim_max = 0;
 	hst->tim_end = 0;
+	hst->tim_prc = 0;
 
 	/* Reset ticks. */
 	hst->bst_cur_bid = 0;
@@ -772,18 +845,27 @@ void tb_lv1_dtr(
 )
 {
 
-	/* Delete all orders. */
-	tb_lv1_upd *upd;
-	ns_slsh_fe(upd, &hst->upds_hst, upds_hst) {
-		_upd_dtr(hst, upd, hst->tim_max);
-	}
+	/* Prepare at time where all orders are out of heatmap. */
+	tb_lv1_prp(hst, hst->tim_end + hst->hmp_tim_spn);
+	
+	/* Process. Will move all orders in tick lists. */
+	tb_lv1_prc(hst);
 
-	/* Delete ticks with a non-null volume. */
+	/* Cleanup. Will purge all updates and only leave resting
+	 * ticks. */
+	tb_lv1_cln(hst);
+
+	/* Delete all resting ticks. */
 	tb_lv1_tck *tck;
+	const u64 hmp_stt = hst->tim_hmp - hst->hmp_tim_spn;
 	ns_map_fe(tck, &hst->tcks, tcks, u64, in) {
-		check(tck->vol_max != 0);
+		assert(tck->tim_max <= hmp_stt);
+		assert(tck->vol_max != 0);
 		_tck_dtr(hst, tck);
 	}
+
+	/* Verify everything is deleted. */
+	assert(hst->upds_hst.oldest == 0);
 	assert(ns_map_u64_emp(&hst->tcks));
 
 	/* Free. */
@@ -797,6 +879,8 @@ void tb_lv1_dtr(
  * Update the current time to @tim_cur,
  * update the bid-ask curves to reflect it.
  * Do not update price levels nor the bitmap.
+ * Allows adding orders up to (<)
+ * @tim_cur + @hst->bad_tim_spn.
  */
 void tb_lv1_prp(
 	tb_lv1_hst *hst,
@@ -806,6 +890,9 @@ void tb_lv1_prp(
 	assert(tim_cur);
 
 	assert(tim_cur >= hst->tim_cur);
+
+	tb_lv1_log("prp : cur : %U -> %U : +%U.\n", hst->tim_cur, tim_cur, tim_cur - hst->tim_cur);
+	tb_lv1_log("prp : end : %U -> %U : +%U.\n", hst->tim_end, tim_cur + hst->bac_tim_spn, tim_cur + hst->bac_tim_spn - hst->tim_end);
 
 	/* If no time adjustment, nothing to do. */
 	if (tim_cur == hst->tim_cur) return;
@@ -821,6 +908,8 @@ void tb_lv1_prp(
 	assert(!(tim_hmp_prv % tim_res));
 	assert(tim_hmp_new >= tim_hmp_prv);
 
+	tb_lv1_log("prp : hmp : %U -> %U.\n", tim_hmp_prv, tim_hmp_new);
+
 	/*
 	 * Report re-anchoring.
 	 * Do not re-anchor for now, as we need all updates
@@ -831,6 +920,8 @@ void tb_lv1_prp(
 	check(!(tim_hmp_new % tim_res));
 	const u64 hmp_shf_tim = (tim_hmp_new - tim_hmp_prv) / tim_res;
 	if (hmp_shf_tim) {
+	
+		tb_lv1_log("prp : rnc : %U : %U -> %U.\n", hmp_shf_tim, hst->hmp_shf_tim, hst->hmp_shf_tim + hmp_shf_tim);
 
 		/* Move the bid-ask curves. */
 		if (hst->bac_nb) { 
@@ -843,10 +934,11 @@ void tb_lv1_prp(
 		/* Update the hashmap end time. */
 		hst->tim_hmp = tim_hmp_new;
 
-		/* Update the bid/ask end time. */
-		hst->tim_end = hst->tim_cur + hst->bac_tim_spn;
 
 	}
+
+	/* Update the bid/ask end time. */
+	hst->tim_end = hst->tim_cur + hst->bac_tim_spn;
 
 }
 
@@ -873,6 +965,8 @@ void tb_lv1_add(
 {
 	assert(upd_nb);
 
+	tb_lv1_log("add : %U%s.\n", upd_nb, (tims) ? "" : " : ini");
+
 	/* Require a prepared history. */
 	assert((!hst->tim_cur) == (!tims));
 
@@ -888,6 +982,8 @@ void tb_lv1_add(
 		const u64 tim = (ini) ? 0 : tims[upd_id];
 		const f64 prc = prcs[upd_id];
 		const f64 vol = vols[upd_id];
+
+		tb_lv1_log("add : ord : %U %d(%U) %d.\n", tim, prc, _prc_to_tck(hst, prc), vol);
 	
 		/* Ensure time is monotonic and in prepared range. */
 		assert(tim_max <= tim);
@@ -897,7 +993,6 @@ void tb_lv1_add(
 		/* Get or create the corresponding tick level.
 		 * If initial population, ensure that price level
 		 * is created. */
-		debug("prc %d tck %U.\n", _prc_to_tck(hst, prc));
 		tb_lv1_tck *tck = _tck_get(hst, _prc_to_tck(hst, prc), ini);
 
 		/* If initial population, just report the start volume. */
@@ -967,11 +1062,13 @@ void tb_lv1_prc(
 		ns_sls *sls = hst->upds_hst.oldest; 
 		upd = hst->upd_prc = sls ? ns_cnt_of(sls, tb_lv1_upd, upds_hst) : 0;
 	}
+	check(upd->tim >= hst->tim_prc);
 
 	/* Process all updates until the first >= tim_cur. 
 	 * If no updates, stop here. */
 	const u64 tim_cur = hst->tim_cur;
 	while (upd && (upd->tim < tim_cur)) {
+		hst->tim_prc = upd->tim;
 
 		/* Insert the update at the end of its price list. */
 		tb_lv1_tck *tck = upd->tck;
@@ -983,7 +1080,8 @@ void tb_lv1_prc(
 
 		/* Fetch the successor. */
 		ns_sls *sls = upd->upds_hst.next; 
-		upd = sls ? ns_cnt_of(sls, tb_lv1_upd, upds_hst) : 0;
+		upd = hst->upd_prc = (sls ? ns_cnt_of(sls, tb_lv1_upd, upds_hst) : 0);
+		check((!upd) || (upd->tim >= hst->tim_prc));
 
 	}
 
@@ -1015,7 +1113,7 @@ void tb_lv1_prc(
 		hst->tck_ref = tck_ref_new; 
 		hst->hmp_shf_tim = 0;
 		hst->hmp_tck_min = hmp_tck_cur_min = tck_ref_new - hmp_tck_hln;
-		hst->hmp_tck_max = hmp_tck_cur_max = tck_ref_new - hmp_tck_hln;
+		hst->hmp_tck_max = hmp_tck_cur_max = tck_ref_new + hmp_tck_hln;
 
 	}
 	check(hst->hmp_tck_max == hst->hmp_tck_min + hst->hmp_dim_tck);
@@ -1066,7 +1164,7 @@ void tb_lv1_cln(
 	assert(hst->tim_hmp > hst->hmp_tim_spn);
 	const u64 hmp_stt = hst->tim_hmp - hst->hmp_tim_spn;
 	tb_lv1_upd *upd;
-	ns_slsh_fe(upd, &hst->upds_hst, upds_hst) {
+	ns_slsh_fes(upd, &hst->upds_hst, upds_hst) {
 
 		/* If update is after heatmap start, stop. */
 		if (upd->tim > hmp_stt) break;

@@ -179,7 +179,7 @@ struct tb_lv1_hst {
 	/* Current time. */
 	u64 tim_cur;
 
-	/* Time below which an order belongs to the heatmap.
+	/* Time below (<) which an order belongs to the heatmap.
 	 * = tim_cur aligned up to time anchor. */
 	u64 tim_hmp;
 
@@ -188,6 +188,9 @@ struct tb_lv1_hst {
 
 	/* Time until which (<) orders can be added. */
 	u64 tim_end;
+
+	/* Time of last processed update. */
+	u64 tim_prc;
 
 	/*
 	 * Ticks.
@@ -246,6 +249,13 @@ struct tb_lv1_hst {
 	u64 *ask_crv;
 
 };
+
+/*******
+ * Log *
+ *******/
+
+tb_lib_log_dec(cor, lv1);
+#define tb_lv1_log(...) tb_log_lib(cor, lv1, __VA_ARGS__)
 
 /*******
  * API *

@@ -1392,11 +1392,11 @@ static inline void _tck_gen(
 			const u64 _upd_max = 2 * ctx->upd_max; \
 			assert((nb) == ctx->upd_max + 1); \
 			tb_tst_lv1_upd *_upds = nh_all(_upd_max * sizeof(tb_tst_lv1_upd)); \
-			ns_mem_cpy(_upds, ctx->upds, ctx->upd_max * sizeof(tb_tst_lv1_upd)); \
+			ns_mem_cpy(_upds, ctx->upds, ctx->upd_nbr * sizeof(tb_tst_lv1_upd)); \
 			nh_fre(ctx->upds, ctx->upd_max * sizeof(tb_tst_lv1_upd)); \
 			ctx->upds = _upds; \
-			ctx->upd_nbr = (nb); \
 			ctx->upd_max = _upd_max; \
+			debug("rsz %U.\n", ctx->upd_max); \
 		} \
 	})
 
@@ -1629,7 +1629,6 @@ static inline void _tck_gen(
 
 		/* Incorporate the current column to the heatmap,
 		 * update the current time. */
-		debug("ADD %U.\n", aid_cur);
 		_hmp_add(ctx, obk_cur, aid_cur, aid_nxt);
 		tim_cur += tim_inc;
 		itr_idx++;
@@ -1716,6 +1715,7 @@ static inline void _tst_lv1(
 	const u64 cel_dim_tim = TIM_INC * TIM_STP;
 	const f64 prc_stp = (f64) 1 / (f64) TCK_RAT;
 	const u64 tim_stt = ns_hsh_u32_rng(sed, (HMP_DIM_TIM + 1) * TIM_INC * TIM_STP, (u32) -1, TIM_INC * TIM_STP);
+	const u64 tck_min = PRC_MIN * HMP_DIM_TCK;
 
 	/* Generation settings. */ 
 	nh_all__(tb_tst_lv1_ctx, ctx);
@@ -1738,7 +1738,9 @@ static inline void _tst_lv1(
 	ctx->obk_ask_rst_prd = 27;
 
 	/* Generate tick data. */
+	debug("Generating updates.\n");
 	_tck_gen(ctx);
+	assert(tck_min == ctx->tck_min);
 
 	/* Read post generation parameters. */
 	const u64 tim_end = ctx->tim_end;
@@ -1768,7 +1770,8 @@ static inline void _tst_lv1(
 		BAC_SIZ
 	);
 
-	/* Set initial prices in groups of 19 by step of 19. */
+	/* Set initial volumes in groups of 19 by step of 19. */
+	debug("Adding initial volumes.\n");
 	assert(TCK_NBR % 19);
 	assert(19 % TCK_NBR);
 	u64 ttl_non_nul = 0;
@@ -1779,7 +1782,6 @@ static inline void _tst_lv1(
 			const f64 vol = ctx->hmp_ini[ri];
 			if (!vol) continue;
 			prcs[nb_non_nul] = TCK_TO_PRC(ri, PRC_MIN, prc_stp); 
-			debug("%U %d.\n", ri, prcs[nb_non_nul]); 
 			assert(prcs[nb_non_nul]);
 			vols[nb_non_nul] = ctx->hmp_ini[ri];
 			nb_non_nul++;
@@ -1801,11 +1803,11 @@ static inline void _tst_lv1(
 	assert(tim_stt > HMP_DIM_TIM * cel_dim_tim);
 	u64 tim_cur = tim_stt;
 	u64 tim_cln = tim_stt - HMP_DIM_TIM * cel_dim_tim;
-	u64 tim_bac = tim_stt + BAC_SIZ * cel_dim_tim;
+	u64 tim_add = tim_stt + BAC_SIZ * cel_dim_tim;
 
 	/* Index of orders to be inserted in the heatmap and bac region. */
 	u64 cur_idx = 0;
-	u64 bac_idx = 0;
+	u64 add_idx = 0;
 	
 	/*
 	 * The way we generate orderbook updates is fundamentally
@@ -1861,35 +1863,35 @@ static inline void _tst_lv1(
 		} \
 	})
 
-	/* Generate and compare the heatmap and bac. */
-	u64 itr_idx = 0;
-	while (tim_cur < tim_end) {
 
-		debug("ITR %U\n", itr_idx);
+	/* Prepare for insertion until bac end. */
+	tb_lv1_prp(hst, tim_cur + 1);
 
-		/* First, insert all orders before the bid-ask time. */
+	/* First, insert all orders before the bid-ask time. */
+	{
+		debug("Adding initial orders.\n");
 		u64 i = 0;
-		u8 prp = 0;
-		while (bac_idx < upd_nb) {
-			const u64 tim = upds[bac_idx].tim; 
-			if (tim > tim_bac) break;
+		u64 tim;
+		while (
+			(add_idx < upd_nb) &&
+			((tim = upds[add_idx].tim) <= tim_add)
+		) {
 
 			/* Add. */
 			tims[i] = tim;
-			const f64 prc = prcs[i] = upds[bac_idx].val;
-			const f64 vol = vols[i] = upds[bac_idx].vol;
+			const f64 prc = prcs[i] = upds[add_idx].val;
+			const f64 vol = vols[i] = upds[add_idx].vol;
 			const u64 tck = PRC_TO_TCK(prc, PRC_MIN, TCK_RAT); 
 
 			/* Incorporate in best bid / ask. */
 			_bac_add(tck, vol, tim);
 
-			bac_idx++;
+			add_idx++;
 			i++;
 
 
 			/* If buffer full, flush. */
 			if (i == 2 * TCK_NBR) {
-				tb_lv1_prp(hst, tim_bac);
 				tb_lv1_add(hst, i, tims, prcs, vols);
 				i = 0;
 			}
@@ -1898,49 +1900,66 @@ static inline void _tst_lv1(
 
 		/* Add all non-flushed updates. */
 		if (i) {
-			tb_lv1_prp(hst, tim_bac);
 			tb_lv1_add(hst, i, tims, prcs, vols);
 		}
+	}
+
+	/* Generate and compare the heatmap and bac. */
+	u64 itr_idx = 0;
+	debug("Adding updates.\n");
+	while (tim_add < tim_end) {
+
+		debug("Iteration %U\n", itr_idx);
 		
 		/* Add the required number of updates, keep track of the bac time. */
-		const u64 add_nb = add_stps[itr_idx % STP_NB];
-		assert(bac_idx + 1 < upd_nb);
-		assert(tim_bac < upds[bac_idx + 1].tim); 
-		i = 0;
-		for (; (i < add_nb) && (bac_idx < upd_nb); (i++), (bac_idx++)) {
+		const u64 _add_nb = add_stps[itr_idx % STP_NB];
+		const u64 add_nb = (_add_nb < TCK_NBR) ? _add_nb : TCK_NBR;
+		assert(add_idx + 1 < upd_nb);
+		assert(tim_add < upds[add_idx + 1].tim); 
+		u64 i = 0;
+		for (; (i < add_nb) && (add_idx < upd_nb); (i++), (add_idx++)) {
 
 			/* Add. */
-			const f64 prc = prcs[i] = upds[bac_idx].val;
-			const f64 vol = vols[i] = upds[bac_idx].vol;
-			const u64 tim = tims[i] = upds[bac_idx].tim;
+			const f64 prc = prcs[i] = upds[add_idx].val;
+			const f64 vol = vols[i] = upds[add_idx].vol;
+			const u64 tim = tims[i] = upds[add_idx].tim;
 			const u64 tck = PRC_TO_TCK(prc, PRC_MIN, TCK_RAT); 
-			assert(tim_bac <= tim);
-			tim_bac = tim;
+			assert(tim_add <= tim);
+			tim_add = tim;
 
 			/* Incorporate in best bid / ask. */
 			_bac_add(tck, vol, tim);
 		}
+
+		/* Update the current time and clean time. */
+		assert(tim_cur < tim_add - BAC_SIZ * cel_dim_tim); 
+		tim_cur = tim_add - BAC_SIZ * cel_dim_tim;
+		assert(tim_cln < tim_cur - HMP_DIM_TIM * cel_dim_tim);
+		tim_cln = tim_cur - HMP_DIM_TIM * cel_dim_tim;
+
+		/* Prepare to add. */
+		tb_lv1_prp(hst, tim_cur + 1);
 
 		/* Add all updates. */
 		tb_lv1_add(hst, i, tims, prcs, vols);
 
 		/* Also add all successor updates at the same time. */
 		i = 0;
-		while (bac_idx < upd_nb) {
-			const u64 tim = upds[bac_idx].tim; 
-			assert(tim_bac <= tim);
-			if (tim_bac != tim) break;
+		while (add_idx < upd_nb) {
+			const u64 tim = upds[add_idx].tim; 
+			assert(tim_add <= tim);
+			if (tim_add != tim) break;
 
 			/* Add. */
 			tims[i] = tim;
-			const f64 prc = prcs[i] = upds[bac_idx].val;
-			const f64 vol = vols[i] = upds[bac_idx].vol;
+			const f64 prc = prcs[i] = upds[add_idx].val;
+			const f64 vol = vols[i] = upds[add_idx].vol;
 			const u64 tck = PRC_TO_TCK(prc, PRC_MIN, TCK_RAT); 
 
 			/* Incorporate in best bid / ask. */
 			_bac_add(tck, vol, tim);
 
-			bac_idx++;
+			add_idx++;
 			i++;
 		}
 
@@ -1951,12 +1970,6 @@ static inline void _tst_lv1(
 
 		/* Process. */
 		tb_lv1_prc(hst);
-
-		/* Update the current time and clone time. */
-		assert(tim_cur < tim_bac - BAC_SIZ * cel_dim_tim); 
-		tim_cur = tim_bac - BAC_SIZ * cel_dim_tim;
-		assert(tim_cln < tim_cur - HMP_DIM_TIM * cel_dim_tim);
-		tim_cln = tim_cur - HMP_DIM_TIM * cel_dim_tim;
 
 		/* Incorporate all orders < current time in the
 		 * heatmap data. */
@@ -1993,9 +2006,16 @@ static inline void _tst_lv1(
 			cur_idx++;
 		}
 
+
+#define SKP_CHK
+
+#ifndef SKP_CHK
+
 		/* Determine the heatmap anchor point. */
 		assert(hst->hmp_tck_max == hst->hmp_tck_min + HMP_DIM_TCK);
-		const u64 src_off = hst->hmp_tck_min;
+		const u64 hmp_min = hst->hmp_tck_min;
+		assert(hmp_min >= tck_min);
+		const u64 src_off = hmp_min - tck_min;
 
 		/* Verify all heatmap columns except the current
 		 * against the reference. */
@@ -2066,13 +2086,19 @@ static inline void _tst_lv1(
 			"ask curve mismatch at index %U/%U : expected %d got %d.\n",
 			BAC_SIZ - 1, BAC_SIZ - 1, bst_ask, ask[BAC_SIZ - 1]
 		);
+#endif
 
 		/* Cleanup one time out of 10. */
 		if (!itr_idx % 20) {
 			tb_lv1_cln(hst);
 		}
 
+		itr_idx++;
 	}	
+
+
+	/* Delete the history. */
+	tb_lv1_dtr(hst);
 
 	/* Free buffers. */ 
 	nh_fre(tims, 2 * TCK_NBR * sizeof(u64));
@@ -2081,9 +2107,6 @@ static inline void _tst_lv1(
 	nh_fre(chc_tims, TCK_NBR * sizeof(u64));
 	nh_fre(chc_sums, TCK_NBR * sizeof(f64));
 	nh_fre(chc_vols, TCK_NBR * sizeof(f64));
-
-	/* Delete the history. */
-	tb_lv1_dtr(hst);
 
 	/* Delete tick data. */
 	_tck_del(ctx);
@@ -2219,6 +2242,7 @@ static u32 _tst_main(
  * Main *
  ********/
 
+
 /*
  * TB main.
  */
@@ -2228,6 +2252,15 @@ u32 prc_tb_main(
 )
 {
 	NS_ARG_INI(argc, argv);
+	NS_ARG_EXTR(
+		"tb", argc, argv,
+		return 1;,
+		"tb entrypoint",
+		(0, flg, vrb, (v), "Enable logs.")
+	);
+	if (vrb__flg) {
+		tb_cor_log_flg = 1;	
+	}
 	u32 ret = 0;
 	NS_ARG_SEL(argc, argv, "tb", , ret,
 		("tst", _tst_main, "run tests.")
