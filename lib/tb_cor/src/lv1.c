@@ -656,10 +656,10 @@ static inline tb_lv1_tck *_tck_get(
 
 /*
  * Return the tick reference at the current time.
- * If the orderbook is currently empty, use the
- * previous bid price.
  * If both best bid and ask exist, use the average.
  * If only a best bid or ask exists, use it.
+ * If the orderbook is currently empty, use the
+ * previous reference.
  */
 static inline u64 _tck_ref_cpt(
 	tb_lv1_hst *hst
@@ -811,6 +811,8 @@ tb_lv1_hst *tb_lv1_ctr(
 	/* Reset ticks. */
 	hst->bst_cur_bid = 0;
 	hst->bst_cur_ask = 0;
+
+	/* Start with a heatmap lower-anchored at 0. */
 	hst->tck_ref = hmp_dim_tck >> 1;
 
 	/* Trigger a full heatmap generation next time. */
@@ -1062,12 +1064,12 @@ void tb_lv1_prc(
 		ns_sls *sls = hst->upds_hst.oldest; 
 		upd = hst->upd_prc = sls ? ns_cnt_of(sls, tb_lv1_upd, upds_hst) : 0;
 	}
-	check(upd->tim >= hst->tim_prc);
 
 	/* Process all updates until the first >= tim_cur. 
 	 * If no updates, stop here. */
 	const u64 tim_cur = hst->tim_cur;
 	while (upd && (upd->tim < tim_cur)) {
+		check(upd->tim >= hst->tim_prc);
 		hst->tim_prc = upd->tim;
 
 		/* Insert the update at the end of its price list. */
@@ -1081,7 +1083,6 @@ void tb_lv1_prc(
 		/* Fetch the successor. */
 		ns_sls *sls = upd->upds_hst.next; 
 		upd = hst->upd_prc = (sls ? ns_cnt_of(sls, tb_lv1_upd, upds_hst) : 0);
-		check((!upd) || (upd->tim >= hst->tim_prc));
 
 	}
 

@@ -17,6 +17,7 @@ prj.tb:
 	$(call nm.arc,lib,lib_nh,../std,nh)
 	$(call nm.arc,lib,lib_us,../std,us)
 	$(call nm.arc,lib,lib_cor,lib,tb_cor)
+	$(call nm.arc,lib,lib_tst,lib,tb_tst)
 	$(call nm.stg,prc,lib)
 	$(call nm.obj,prc,prc_hs,../std,hs)
 	$(call nm.fobj,prc,prc_tb,prc,tb)
