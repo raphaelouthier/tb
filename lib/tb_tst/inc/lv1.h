@@ -8,6 +8,7 @@
  *********/
 
 types(
+	tb_tst_lv1_gen,
 	tb_tst_lv1_upd,
 	tb_tst_lv1_ctx
 );
@@ -17,12 +18,63 @@ types(
  **************/
 
 /*
+ * A generator generates updates on an
+ * orderbook in a implementation-defined
+ * manner.
+ */
+struct tb_tst_lv1_gen {
+	
+	/*
+	 * Destructor.
+	 */
+	void (*dtr)(
+		tb_tst_lv1_gen *gen
+	);
+
+	/*
+	 * Price init.
+	 */
+	void (*ini)(
+		tb_tst_lv1_gen *gen,
+		u64 sed,
+		u64 tck_min,
+		u64 tck_max,
+		f64 ref_vol
+	);
+
+	/*
+	 * Tick update.
+	 */
+	void (*tck_upd)(
+		tb_tst_lv1_gen *gen
+	);
+
+	/*
+	 * Orderbook update.
+	 */
+	void (*obk_upd)(
+		tb_tst_lv1_gen *gen,
+		f64 *obk
+	);
+
+	/*
+	 * Choose the skip count for an iteration.
+	 */
+	u64 (*skp)(
+		tb_tst_lv1_gen *gen,
+		u64 itr_idx
+	);
+
+};
+
+
+/*
  * Orderbook update.
  */
 struct tb_tst_lv1_upd {
 
 	/* Price of update. */
-	f64 val;
+	f64 prc;
 
 	/* Volume of update. */
 	f64 vol;
@@ -77,37 +129,8 @@ struct tb_tst_lv1_ctx {
 	/* Bid/ask curves size. */
 	u64 bac_siz;
 
-	/*
-	 * Generation parameters.
-	 */
-
-	/* Generation base volume. */
-	f64 gen_vol;
-
-	/* Skip period. */
-	u64 skp_prd;
-
-	/* Orderbook total reset period. */
-	u64 obk_rst_prd;
-
-	/* Orderbook volume reset period. */
-	u64 obk_vol_rst_prd;
-
-	/* Orderbook normal bid period. 1. */
-
-	/* Orderbook exceptional bid period. */
-	u64 obk_bid_exc_prd;
-
-	/* Orderbook bid reset period. */
-	u64 obk_bid_rst_prd;
-
-	/* Orderbook normal ask period. 1. */
-
-	/* Orderbook exceptional ask period. */
-	u64 obk_ask_exc_prd;
-
-	/* Orderbook ask reset period. */
-	u64 obk_ask_rst_prd;
+	/* Reference volume. */
+	f64 ref_vol;
 
 	/*
 	 * Generation stats.
@@ -115,18 +138,6 @@ struct tb_tst_lv1_ctx {
 
 	/* Current time. */
 	u64 tim_cur;
-
-	/* Current tick. */
-	u64 tck_cur;
-
-	/* Previous tick. */
-	u64 tck_prv;
-
-	/* Current generation step. */
-	u64 gen_idx;
-
-	/* Generation seed. */
-	u64 gen_sed;
 
 	/* Tick min. */
 	u64 tck_min;
@@ -184,6 +195,26 @@ struct tb_tst_lv1_ctx {
 	u64 tim_end;
 
 };
+
+/************
+ * Internal *
+ ************/
+
+/*
+ * Generate a sequence of orderbook updates as
+ * specified by @ctx.
+ */
+void tb_tst_lv1_upds_gen(
+	tb_tst_lv1_ctx *ctx,
+	tb_tst_lv1_gen *gen
+);
+
+/*
+ * Delete generated updates.
+ */
+void tb_tst_lv1_upds_del(
+	tb_tst_lv1_ctx *ctx
+);
 
 /*******
  * API *
