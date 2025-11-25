@@ -174,8 +174,11 @@ struct tb_lv1_hst {
 	/* Bid / ask curves time span. */
 	u64 bac_tim_spn;
 
-	/* Price to tick coeff. */
-	f64 prc_cff;
+	/* Number of ticks per price unit. */
+	f64 tck_rat;
+
+	/* Inverse. */
+	f64 prc_rat;
 
 	/*
 	 * Times.

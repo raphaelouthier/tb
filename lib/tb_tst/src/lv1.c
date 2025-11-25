@@ -90,6 +90,9 @@ static inline void _bac_add(
 	}
 }
 
+/*
+ * Push all updates until @tim_add.
+ */
 static inline void _upds_add_ini(
 	tb_tst_lv1_ctx *ctx,
 	tb_lv1_hst *hst,
@@ -185,6 +188,7 @@ static inline u64 _upds_add(
 		const f64 vol = vols[gen_nbr] = ctx->upds[uid_add].vol;
 		const u64 tim = tims[gen_nbr] = ctx->upds[uid_add].tim;
 		const u64 tck = _prc_to_tck(ctx, prc); 
+		assert(_tck_to_prc(ctx, tck) == prc);
 		assert(tim_add <= tim);
 		tim_add = tim;
 
@@ -231,6 +235,7 @@ static inline u64 _upds_add_agn(
 		const f64 prc = prcs[gen_nbr] = ctx->upds[uid_add].prc;
 		const f64 vol = vols[gen_nbr] = ctx->upds[uid_add].vol;
 		const u64 tck = _prc_to_tck(ctx, prc); 
+		assert(_tck_to_prc(ctx, tck) == prc);
 
 		/* Incorporate in best bid / ask. */
 		_bac_add(ctx, tck, vol, tim, bst_bac_aidp, bst_bidp, bst_askp);
@@ -245,14 +250,14 @@ static inline u64 _upds_add_agn(
 }
 
 /*
- * Incorporate all updates until @tim_cur starting
+ * Incorporate all updates until (<=) @tim_cur starting
  * at *@uid_curp.
  * Update @uid_curp.
  */
 static inline void _upds_mov(
 	tb_tst_lv1_ctx *ctx,
 	tb_lv1_hst *hst,
-	u64* uid_curp,
+	u64 *uid_curp,
 	u64 tim_cur,
 	u64 *chc_tims,
 	f64 *chc_sums,
@@ -266,7 +271,7 @@ static inline void _upds_mov(
 
 		/* Check. */
 		const u64 tim = ctx->upds[uid_cur].tim; 
-		if (tim >= tim_cur) break;
+		if (tim > tim_cur) break;
 
 		/* Read. */
 		const f64 prc = ctx->upds[uid_cur].prc; 
@@ -310,7 +315,7 @@ static inline u64 _uid_cln_upd(
 	while (uid_cln < ctx->upd_nbr) {
 		const u64 tim = ctx->upds[uid_cln].tim; 
 		assert(tim_cln <= tim);
-		if (tim_cln != tim) break;
+		if (tim_cln < tim) break;
 		uid_cln++;
 	}
 	return uid_cln;
@@ -432,12 +437,13 @@ static inline void _vrf_hst(
 	assert(uid_cln <= upd_nbr);
 	assert(uid_cur <= upd_nbr);
 	assert(uid_add <= upd_nbr);
-	assert((!did_cln) || (uid_cln == upd_nbr) || (ctx->upds[uid_cln].tim == tim_cln));
-	assert((uid_cur == upd_nbr) || (ctx->upds[uid_cur].tim == tim_cur));
-	assert((uid_add == upd_nbr) || (ctx->upds[uid_add].tim == tim_add));
+	assert((!did_cln) || (!uid_cln) || (ctx->upds[uid_cln - 1].tim < tim_cln));
+	assert((!did_cln) || (uid_cln == upd_nbr) || (ctx->upds[uid_cln].tim >= tim_cln));
+	assert((uid_cur <= upd_nbr) || (ctx->upds[uid_cur].tim == tim_cur));
+	assert((!uid_add) || (ctx->upds[uid_add - 1].tim == tim_add));
+	assert((uid_add == upd_nbr) || (ctx->upds[uid_add].tim > tim_add));
 	assert((!did_cln) || (uid_cln + 1 >= upd_nbr) || (ctx->upds[uid_cln + 1].tim > tim_cln)); 
 	assert((uid_cur + 1 >= upd_nbr) || (ctx->upds[uid_cur + 1].tim > tim_cur)); 
-	assert((uid_add + 1 >= upd_nbr) || (ctx->upds[uid_add + 1].tim > tim_add)); 
 
 	/*
 	 * First, check the full update sequence and verify that :
@@ -447,7 +453,8 @@ static inline void _vrf_hst(
 	 */
 	tb_lv1_upd *upd;
 	u64 idx = 0;
-	u64 max = uid_cln - uid_add;
+	u64 max = uid_add - uid_cln;
+	const u64 tck_min = ctx->tck_min; 
 	ns_slsh_fe(upd, &hst->upds_hst, upds_hst) {
 		tb_tst_lv1_upd *src = ctx->upds + uid_cln + idx;
 
@@ -458,21 +465,23 @@ static inline void _vrf_hst(
 		const f64 prc = src->prc;
 		const u64 tck = _prc_to_tck(ctx, prc);
 		assert(
-			(upd->tck->tcks.val == tck) &&
+			(upd->tck->tcks.val == tck_min + tck) &&
 			(upd->tim == src->tim) &&
 			(upd->vol == src->vol),
-			"update sequence mismatch at index %U/%U (uid %U/%U) : expected (tim : %U, tck : %U (prc : %d), vol : %d), got (tim : %U, tck : %U (prc : %d), vol : %d).\n",
+			"update sequence mismatch at index %U/%U (uid %U/%U) :\n"
+			"\texp (tim : %U, vol : %d, tck : %U (prc : %d)),\n"
+			"\tgot (tim : %U, vol : %d, tck : %U).\n",
 			idx, max, uid_cln + idx, uid_add,
-			src->tim, tck, prc, src->vol,
-			upd->tim, upd->tck->tcks.val, upd->vol
+			src->tim, src->vol, tck_min + tck, prc,
+			upd->tim, upd->vol, upd->tck->tcks.val
 		);
 
 		/* Check that the update's list state is correct. */
-		if ((upd->tim < tim_cur) != (!ns_dls_empty(&upd->upds_tck))) {
-			if (upd->tim < tim_cur) {
-				assert(!ns_dls_empty(&upd->upds_tck), "update < current time not in tick list.");
+		if ((upd->tim <= tim_cur) != (!ns_dls_empty(&upd->upds_tck))) {
+			if (upd->tim <= tim_cur) {
+				assert(!ns_dls_empty(&upd->upds_tck), "update <= current time not in tick list.");
 			} else {
-				assert(ns_dls_empty(&upd->upds_tck), "update >= current time in tick list.");
+				assert(ns_dls_empty(&upd->upds_tck), "update > current time in tick list.");
 			}
 			assert(0, "should have asserted.\n");
 		}
@@ -496,7 +505,7 @@ static inline void _vrf_hst(
 	for (idx = uid_add - uid_cur; idx--;) {
 		tb_tst_lv1_upd *src = ctx->upds + uid_cur + idx;
 		const f64 prc = src->prc;
-		const u64 tck_val = _prc_to_tck(ctx, prc);
+		const u64 tck_val = tck_min + _prc_to_tck(ctx, prc);
 
 		/* Find the tick for this update. If its flag is already set, nothing to do. */
 		tck = assert(ns_map_sch(&hst->tcks, tck_val, u64, tb_lv1_tck, tcks));
@@ -504,9 +513,9 @@ static inline void _vrf_hst(
 
 		/* This is the first time we encounter this tick.
 		 * Hence, its maximal time and volume should match
-		 * @upd's. */ 
-		assert(tck->vol_max == upd->vol);
-		assert(tck->tim_max == upd->tim);
+		 * @src's. */ 
+		assert(tck->vol_max == src->vol);
+		assert(tck->tim_max == src->tim);
 		tck->dbg = 1;
 
 		/* Count a tick processed, if all have been, stop. */
@@ -521,7 +530,7 @@ static inline void _vrf_hst(
 	ns_map_fe(tck, &hst->tcks, tcks, u64, in) {
 		if (tck->dbg == 0) {
 			assert(tck->vol_max == tck->vol_cur);
-			assert(tck->tim_max < tim_cur);
+			assert((!tim_cur) || tck->tim_max < tim_cur);
 		} else {
 			tck_cnt++;
 		}
@@ -531,18 +540,18 @@ static inline void _vrf_hst(
 
 	/* Traverse the update list in reverse between current and clean. */
 	tck_cnt = tck_nbr;
-	for (idx = uid_add - uid_cur; idx--;) {
-		tb_tst_lv1_upd *src = ctx->upds + uid_cur + idx;
+	for (idx = uid_cur - uid_cln; idx--;) {
+		tb_tst_lv1_upd *src = ctx->upds + uid_cln + idx;
 		const f64 prc = src->prc;
-		const u64 tck_val = _prc_to_tck(ctx, prc);
+		const u64 tck_val = tck_min + _prc_to_tck(ctx, prc);
 
 		/* Find the tick for this update. If its flag is already set, nothing to do. */
 		tck = assert(ns_map_sch(&hst->tcks, tck_val, u64, tb_lv1_tck, tcks));
 		if (tck->dbg) continue;
 
 		/* This is the first time we encounter this tick.
-		 * Hence, its current volume should match @upd's. */ 
-		assert(tck->vol_cur == upd->vol);
+		 * Hence, its current volume should match @src's. */ 
+		assert(tck->vol_cur == src->vol);
 		tck->dbg = 1;
 
 		/* Count a tick processed, if all have been, stop. */
@@ -571,15 +580,15 @@ static inline void _vrf_hst(
 	for (u64 uid = uid_cln; uid--;) {
 		tb_tst_lv1_upd *src = ctx->upds + uid;
 		const f64 prc = src->prc;
-		const u64 tck_val = _prc_to_tck(ctx, prc);
+		const u64 tck_val = tck_min + _prc_to_tck(ctx, prc);
 
 		/* Find the tick for this update. If its flag is already set, nothing to do. */
 		tck = assert(ns_map_sch(&hst->tcks, tck_val, u64, tb_lv1_tck, tcks));
 		if (tck->dbg) continue;
 
 		/* This is the first time we encounter this tick.
-		 * Hence, its current volume should match @upd's. */ 
-		assert(tck->vol_stt == upd->vol);
+		 * Hence, its current volume should match @src's. */ 
+		assert(tck->vol_stt == src->vol);
 		tck->dbg = 1;
 
 		/* Count a tick processed, if all have been, stop. */
@@ -590,9 +599,16 @@ static inline void _vrf_hst(
 
 	/* Now, clear the debug flag on each tick.
 	 * Every tick we did not encounter should have a
-	 * start price equal to the initial resting price. */
-	const u64 tck_min = ctx->tck_min; 
+	 * start price equal to the initial resting price.
+	 * At the same time, determine the best bid / ask. */
+	u64 bst_cur_bid = 0;
+	u64 bst_max_bid = 0;
+	u64 bst_cur_ask = (u64) -1;
+	u64 bst_max_ask = (u64) -1;
 	ns_map_fe(tck, &hst->tcks, tcks, u64, in) {
+		debug("tck %U/%U %p %U %d.\n", tck_cnt, tck_nbr, tck, tck->tcks.val, tck->vol_max);
+
+		/* Check tick state. */
 		if (tck->dbg == 0) {
 			const u64 tck_val = tck->tcks.val;
 			assert(tck_val >= tck_min);
@@ -601,8 +617,47 @@ static inline void _vrf_hst(
 			tck_cnt++;
 		}
 		tck->dbg = 0;
+
+		/* Determine best bids / asks. */
+		const u64 tck_val = tck->tcks.val;
+		const f64 vol_max = tck->vol_max;
+		const f64 vol_cur = tck->vol_cur;
+		assert(tck_val != 0);
+		assert(tck_val != (u64) -1);
+		if (vol_max != 0) {
+			if (vol_max < 0) {
+				assert(bst_max_ask == (u64) -1, "found a bid after an ask at max time.\n");
+				bst_max_bid = tck_val;
+			} else {
+				if (bst_max_ask == (u64) -1) {
+					bst_max_ask = tck_val;
+				}
+			}
+		}
+		if (vol_cur != 0) {
+			if (vol_cur < 0) {
+				assert(bst_cur_ask == (u64) -1, "found a bid after an ask at cur time.\n");
+				bst_cur_bid = tck_val;
+			} else {
+				if (bst_cur_ask == (u64) -1) {
+					bst_cur_ask = tck_val;
+				}
+			}
+		}
+		assert(bst_cur_bid < bst_cur_ask);
+		assert(bst_max_bid < bst_max_ask);
 	}
 	assert(tck_cnt == tck_nbr);
+
+	/* Verify best bids/asks. */
+	assert((bst_cur_bid == 0) == (hst->bst_cur_bid == 0));
+	assert((bst_max_bid == 0) == (hst->bst_max_bid == 0));
+	assert((bst_cur_ask == (u64) -1) == (hst->bst_cur_ask == 0));
+	assert((bst_max_ask == (u64) -1) == (hst->bst_max_ask == 0));
+	assert((bst_cur_bid == 0) || (hst->bst_cur_bid->tcks.val == bst_cur_bid));
+	assert((bst_max_bid == 0) || (hst->bst_max_bid->tcks.val == bst_max_bid));
+	assert((bst_cur_ask == (u64) -1) || (hst->bst_cur_ask->tcks.val == bst_cur_ask));
+	assert((bst_max_ask == (u64) -1) || (hst->bst_max_ask->tcks.val == bst_max_ask));
 
 }
 
@@ -615,9 +670,7 @@ static inline void _vrf_res(
 	u64 uid_cln,
 	u64 uid_cur,
 	u64 uid_add,
-	u64 tim_cln,
 	u64 tim_cur,
-	u64 tim_add,
 	u64 bst_bid,
 	u64 bst_ask,
 	u64 *chc_tims,
@@ -626,7 +679,7 @@ static inline void _vrf_res(
 )
 {
 
-#define SKP_CHK
+//#define SKP_CHK
 
 #ifndef SKP_CHK
 
@@ -635,11 +688,7 @@ static inline void _vrf_res(
 		const u64 aid_cur = (tim_cur + 1 - ctx->tim_stt) / ctx->aid_wid;
 		assert(ref == ctx->ref_arr[aid_cur], "reference mismatch at time %U cell %U : expected %U, got %U.\n",
 			tim_cur + 1, aid_cur, ctx->ref_arr[aid_cur], ref); 
-
 		
-//#error following computations seem to assume that tim_cur is the preparation time.
-		//	It is not, tim_cur + 1 is the preparation time.
-
 		/* Determine the heatmap anchor point. */
 		assert(hst->hmp_tck_max == hst->hmp_tck_min + ctx->hmp_dim_tck);
 		const u64 hmp_min = hst->hmp_tck_min;
@@ -675,7 +724,7 @@ static inline void _vrf_res(
 
 		}
 
-		/* Verify the heatmap current column agains the
+		/* Verify the heatmap current column against the
 		 * currently updated column. */
 		const f64 *hmp_cmp = hmp + (ctx->hmp_dim_tim - 1) * ctx->hmp_dim_tck;
 		const u64 div = (tim_cur - ctx->tim_stt) % ctx->aid_wid;
@@ -726,7 +775,8 @@ static inline void _vrf_res(
 static void _lv1_run(
 	nh_tst_sys *sys,
 	u64 sed,
-	tb_tst_lv1_gen *gen
+	tb_tst_lv1_gen *gen,
+	u8 frc_vrf
 )
 {
 
@@ -817,10 +867,18 @@ static void _lv1_run(
 	assert(ttl_non_nul, "init with no volume.\n");
 
 	/* Determine the initial times. */
-	assert(tim_stt > HMP_DIM_TIM * aid_wid);
+
+	/* The time below (<=) which orders belong to the
+	 * heatmap. We prepare until tim_cur + 1. */
 	u64 tim_cur = tim_stt;
-	u64 tim_cln = tim_stt - HMP_DIM_TIM * aid_wid;
+
+	/* The time of the last update we pushed into the history. */
 	u64 tim_add = tim_stt + BAC_SIZ * aid_wid;
+
+	/* The time below which (<=) we remove updates
+	 * from the history. */
+	assert(tim_stt > HMP_DIM_TIM * aid_wid);
+	u64 tim_cln = tim_stt - HMP_DIM_TIM * aid_wid;
 
 	/* Index of next update to be moved to the heatmap. */
 	u64 uid_cur = 0;
@@ -869,9 +927,32 @@ static void _lv1_run(
 	u64 bst_bid = ctx->bid_ini[0];
 	u64 bst_ask = ctx->ask_ini[0];
 
+	/* Prepare for (no) insertion until start time. */
+	tb_lv1_prp(hst, tim_stt);
+
+	/* Process. */
+	tb_lv1_prc(hst);
+
+	/* Verify the history's internal state. */
+	_vrf_hst(
+		ctx, hst,
+		0, 0, 0,
+		0, 0, 0,
+		0
+	);
+
+	/* Verify the result. */
+	_vrf_res(
+		ctx, hst,
+		uid_cln, uid_cur, uid_add,
+		tim_cur,
+		bst_bid, bst_ask,
+		chc_tims, chc_sums, chc_vols);
+
 	/* Prepare for insertion until bac end. */
 	tb_lv1_prp(hst, tim_cur + 1);
 
+	/* Push all updates until @tim_add. */
 	_upds_add_ini(ctx, hst, tims, prcs, vols, tim_add, &uid_add, &bst_bac_aid, &bst_bid, &bst_ask);
 
 	/* Generate and compare the heatmap and bac. */
@@ -893,11 +974,18 @@ static void _lv1_run(
 		/* Update the current time and clean time. */
 		assert(tim_cur < tim_add - BAC_SIZ * aid_wid); 
 		tim_cur = tim_add - BAC_SIZ * aid_wid;
-		assert(tim_cln < tim_cur - HMP_DIM_TIM * aid_wid);
-		tim_cln = tim_cur - HMP_DIM_TIM * aid_wid;
 		
 		/* Prepare to add. */
 		tb_lv1_prp(hst, tim_cur + 1);
+
+		/* Determine the new heatmap start time,
+		 * and the new bac end time. */
+		const u64 hmp_end = aid_wid * ((tim_cur + aid_wid) / aid_wid);
+		assert(hmp_end >= HMP_DIM_TIM * aid_wid);
+		tim_cln = hmp_end - HMP_DIM_TIM * aid_wid;
+		assert(hst->tim_cur == tim_cur + 1);
+		assert(hst->tim_hmp == hmp_end);
+		assert(hst->tim_end == tim_add + 1);
 
 		/* Add all updates. */
 		tb_lv1_add(hst, gen_nbr, tims, prcs, vols);
@@ -918,13 +1006,23 @@ static void _lv1_run(
 		/* Process. */
 		tb_lv1_prc(hst);
 
-		/* Incorporate all orders < current time in the
+		/* Incorporate all orders <= current time in the
 		 * heatmap data. */
 		_upds_mov(ctx, hst, &uid_cur, tim_cur, chc_tims, chc_sums, chc_vols, &chc_aid);
 
 		/* Cleanup one time out of 10. */
 		u8 do_cln = (!itr_idx % 20);
 		if (do_cln) {
+
+			/* Verify the history internal state. */
+			if (frc_vrf) {
+				_vrf_hst(
+					ctx, hst,
+					uid_cln, uid_cur, uid_add,
+					tim_cln, tim_cur, tim_add,
+					0
+				);
+			}
 
 			/* Determine the clean index. */
 			uid_cln = _uid_cln_upd(ctx, uid_cln, tim_cln);
@@ -935,18 +1033,20 @@ static void _lv1_run(
 		}
 
 		/* Verify the history internal state. */
-		_vrf_hst(
-			ctx, hst,
-			uid_cln, uid_cur, uid_add,
-			tim_cln, tim_cur, tim_add,
-			do_cln
-		);
+		if (frc_vrf) {
+			_vrf_hst(
+				ctx, hst,
+				uid_cln, uid_cur, uid_add,
+				tim_cln, tim_cur, tim_add,
+				do_cln
+			);
+		}
 
 		/* Verify the result. */
 		_vrf_res(
 			ctx, hst,
 			uid_cln, uid_cur, uid_add,
-			tim_cln, tim_cur, tim_add,
+			tim_cur,
 			bst_bid, bst_ask,
 			chc_tims, chc_sums, chc_vols);
 
@@ -997,6 +1097,6 @@ void tb_tst_lv1(
 		27
 	);
 
-	_lv1_run(sys, sed, &rdm->gen);
+	_lv1_run(sys, sed, &rdm->gen, 1);
 
 }

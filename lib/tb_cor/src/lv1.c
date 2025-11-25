@@ -39,17 +39,33 @@ static inline u64 _bst_ask_val(
 	tb_lv1_tck *tck
 ) {return (tck) ? tck->tcks.val : (u64) -1;}
 
-/*****************
- * Price to tick *
- *****************/
+/******************
+ * Price <=> tick *
+ ******************/
 
+/*
+ * Price -> tick.
+ */
 static inline u64 _prc_to_tck(
 	tb_lv1_hst *hst,
 	f64 prc
 )
 {
-	assert(prc > 0);
-	return (u64) (f64) ((f64) prc * (f64) hst->prc_cff); 
+	check(prc > 0);
+	return (u64) (f64) ((f64) prc * (f64) hst->tck_rat + 0.1); 
+}
+
+/*
+ * Tick -> price.
+ */
+static inline f64 _tck_to_prc(
+	tb_lv1_hst *hst,
+	u64 tck
+)
+{
+	check(tck != 0);
+	check(tck != (u64) -1);
+	return (f64) tck * hst->prc_rat;
 }
 
 /*******************
@@ -171,14 +187,16 @@ static inline u64 _to_hmp_end_tim(
 		/* If is bid but was best ask, or
 		 * if is ask but was best bid, invalidate. */ \
 		if ( \
-			(is_ask || (tck == hst->bst_bid_nam)) || \
-			((!is_ask) || (tck == hst->bst_ask_nam)) \
+			(is_ask && (tck == hst->bst_bid_nam)) || \
+			((!is_ask) && (tck == hst->bst_ask_nam)) \
 		) { \
+			debug("inv oth\n"); \
 			BAS_INV(tck, vol_nam, bst_bid_nam, bst_ask_nam); \
 		} \
 \
 		/* If bid, if price is superior to best bid, select as best bid. */ \
 		if (!is_ask) { \
+			debug("cdt %p "#bst_bid_nam" %p %U.\n", prv_bst_bid, (prv_bst_bid) ? prv_bst_bid->tcks.val : 0); \
 			if ((!prv_bst_bid) || (prv_bst_bid->tcks.val < tck_val)) { \
 				debug("bst %p "#bst_bid_nam" %U %d.\n", tck, tck->tcks.val, tck->vol_nam); \
 				bid_upd = 1; \
@@ -675,6 +693,7 @@ static inline u64 _tck_ref_cpt(
 	u64 tck_ref = 0;
 	if (bid && ask) {
 		tck_ref = (bid->tcks.val + ask->tcks.val) / 2; 
+		//assert(0, "tck_ref bid %U ask %U val %U.\n", bid->tcks.val, ask->tcks.val, tck_ref);
 	} else if (!(bid || ask)) {
 		tck_ref = hst->tck_ref;
 		debug("orderbook empty.\n");
@@ -715,7 +734,6 @@ static inline tb_lv1_upd *_upd_ctr(
 	nh_all__(tb_lv1_upd, upd);
 	ns_dls_init(&upd->upds_tck);
 	ns_slsh_push(&hst->upds_hst, &upd->upds_hst);
-	upd->upds_tck.next = 0;
 	upd->tck = tck;
 	upd->vol = vol;
 	upd->tim = tim;
@@ -772,13 +790,13 @@ static inline void _upd_dtr(
  */
 tb_lv1_hst *tb_lv1_ctr(
 	u64 tim_res,
-	u64 prc_res,
+	u64 tck_rat,
 	u64 hmp_dim_tim,
 	u64 hmp_dim_tck,
 	u64 bac_nb
 )
 {
-	assert(prc_res >= 1);
+	assert(tck_rat >= 1);
 	assert(tim_res);
 	assert(hmp_dim_tim);
 	assert(hmp_dim_tck);
@@ -799,7 +817,8 @@ tb_lv1_hst *tb_lv1_ctr(
 	hst->bac_nb = bac_nb;
 	hst->hmp_tim_spn = (hmp_dim_tim + 1) * tim_res;
 	hst->bac_tim_spn = bac_nb * tim_res;
-	hst->prc_cff = (f64) prc_res + 0.1;
+	hst->tck_rat = (f64) tck_rat;
+	hst->prc_rat = (f64) 1 / (f64) tck_rat;
 
 	/* Reset times. */
 	hst->tim_cur = 0;
@@ -936,7 +955,6 @@ void tb_lv1_prp(
 		/* Update the hashmap end time. */
 		hst->tim_hmp = tim_hmp_new;
 
-
 	}
 
 	/* Update the bid/ask end time. */
@@ -984,8 +1002,10 @@ void tb_lv1_add(
 		const u64 tim = (ini) ? 0 : tims[upd_id];
 		const f64 prc = prcs[upd_id];
 		const f64 vol = vols[upd_id];
+		const u64 tck_val = _prc_to_tck(hst, prc);
+		check(tck_val == _prc_to_tck(hst, _tck_to_prc(hst, tck_val)));
 
-		tb_lv1_log("add : ord : %U %d(%U) %d.\n", tim, prc, _prc_to_tck(hst, prc), vol);
+		tb_lv1_log("add : ord : %U %d(%U) %d.\n", tim, prc, tck_val, vol);
 	
 		/* Ensure time is monotonic and in prepared range. */
 		assert(tim_max <= tim);
@@ -995,7 +1015,7 @@ void tb_lv1_add(
 		/* Get or create the corresponding tick level.
 		 * If initial population, ensure that price level
 		 * is created. */
-		tb_lv1_tck *tck = _tck_get(hst, _prc_to_tck(hst, prc), ini);
+		tb_lv1_tck *tck = _tck_get(hst, tck_val, ini);
 
 		/* If initial population, just report the start volume. */
 		if (ini) {
@@ -1105,6 +1125,8 @@ void tb_lv1_prc(
 		const u64 tck_ref_new = _tck_ref_cpt(hst);
 		check(tck_ref_cur >= (hst->hmp_dim_tck >> 1));
 		check(tck_ref_new >= (hst->hmp_dim_tck >> 1));
+
+		//assert(0, "tck_ref old %U new %U.\n", tck_ref_cur, tck_ref_new);
 
 		/* Move heatmap data. */
 		const s64 hmp_shf_tck = (s64) tck_ref_new - (s64) tck_ref_cur;

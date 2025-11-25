@@ -178,7 +178,7 @@ static inline void _bac_upd(
 			assert(bst_ask == (u64) -1); // Bid found at tick below first ask.
 			if (bst_bid < tck_idx) bst_bid = tck_idx;
 		} else {
-			if (bst_ask != (u64) -1) bst_ask = tck_idx;
+			if (bst_ask == (u64) -1) bst_ask = tck_idx;
 		}
 	}
 	assert(bst_bid < bst_ask);
@@ -385,9 +385,10 @@ void tb_tst_lv1_upds_gen(
 	/* Tick update offsets. */
 	u8 prm_idx = 0;
 
-	/* Start with the heatmap on ticks bottom. */
+	/* Determine the initial anchoring. */
 	u64 prv_ref = ctx->hmp_dim_tck >> 1;  
-	ctx->ref_arr[0] = prv_ref;
+	ctx->ref_arr[0] = prv_ref = _tck_ref(prv_bst_bid, prv_bst_ask, prv_ref, ctx->hmp_dim_tck);
+	//assert(0, "ini %U %U %U.\n", prv_bst_bid, prv_bst_ask, ctx->ref_arr[0]);
 
 	/* Generate as many updates as requested. */ 
 	u64 tim_lst = tim_stt;
