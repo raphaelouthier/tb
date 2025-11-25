@@ -126,6 +126,11 @@ struct tb_lv1_tck {
 	/* Time of most recent volume update. */
 	u64 tim_max;
 
+	#ifdef DEBUG
+	/* Debug flag. */
+	u8 dbg;
+	#endif
+
 };
 
 /*
