@@ -1,3 +1,8 @@
+TODO The split generator test is unsychronized because of the init state.
+	do a blank shot at the start or another entrypoint for _init_.
+
+
+
 TODO seeds 0x4eea3960d6b713 and 0x4eea3960d6b713c cause the lv1 test to fail.
 
 TODO verify that the clean procedure works OK 

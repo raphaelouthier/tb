@@ -63,10 +63,14 @@ static void _spl_obk_upd(
 		_swap(bid_set, bid_clr);
 		_swap(ask_set, ask_clr);
 	}
-	obk[bid_clr - spl->tck_min] = 0;
-	obk[bid_set - spl->tck_min] = -spl->ref_vol;
-	obk[ask_clr - spl->tck_min] = 0;
-	obk[ask_set - spl->tck_min] = spl->ref_vol;
+	if (spl->bid) {
+		obk[bid_clr - spl->tck_min] = 0;
+		obk[bid_set - spl->tck_min] = -spl->ref_vol;
+	}
+	if (spl->ask) {
+		obk[ask_clr - spl->tck_min] = 0;
+		obk[ask_set - spl->tck_min] = spl->ref_vol;
+	}
 	SAFE_DECR(spl->cnt);
 	if (!spl->cnt) {
 		spl->is0 = !spl->is0;
@@ -88,6 +92,8 @@ static u64 _spl_skp(
  * Construct.
  */
 tb_tst_lv1_gen_spl *tb_tst_lv1_gen_spl_ctr(
+	u8 bid,
+	u8 ask,
 	u64 bid0,
 	u64 bid1,
 	u64 ask0,
@@ -101,6 +107,8 @@ tb_tst_lv1_gen_spl *tb_tst_lv1_gen_spl_ctr(
 	spl->gen.tck_upd = &_spl_tck_upd;
 	spl->gen.obk_upd = &_spl_obk_upd;
 	spl->gen.skp = &_spl_skp;
+	spl->bid = bid;
+	spl->ask = ask;
 	spl->bid0 = bid0;
 	spl->bid1 = bid1;
 	spl->ask0 = ask0;

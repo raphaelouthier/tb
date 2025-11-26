@@ -187,6 +187,9 @@ struct tb_lv1_hst {
 	/* Current time. */
 	u64 tim_cur;
 
+	/* Reanchoring time. */
+	u64 tim_rnc;
+
 	/* Time below (<) which an order belongs to the heatmap.
 	 * = tim_cur aligned up to time anchor. */
 	u64 tim_hmp;

@@ -30,6 +30,12 @@ struct tb_tst_lv1_gen_spl {
 	 * Parameters.
 	 */
 
+	/* Set bids ? */
+	u8 bid;
+
+	/* Set asks ? */
+	u8 ask;
+
 	/* Bid tictick*/
 	u64 bid0;
 
@@ -70,6 +76,8 @@ struct tb_tst_lv1_gen_spl {
  * Construct.
  */
 tb_tst_lv1_gen_spl *tb_tst_lv1_gen_spl_ctr(
+	u8 bid,
+	u8 ask,
 	u64 bid0,
 	u64 bid1,
 	u64 ask0,

@@ -87,6 +87,65 @@ static inline u64 _to_hmp_end_tim(
 	return tim_cur - (tim_cur % res);
 }
 
+/***************
+ * Propagation *
+ ***************/
+
+/*
+ * Propagate bid curve values from @bac_aid + 1
+ * to @prp_aid.
+ */
+static inline void _bid_prp(
+	tb_lv1_hst *hst,
+	u64 bac_aid,
+	u64 bid_aid,
+	u64 prp_aid,
+	tb_lv1_tck *bst_bid
+)
+{
+	if (bac_aid <= prp_aid) {
+		const u64 prp_val = _bst_bid_val(bst_bid);
+		const u64 stt_aid = (bid_aid) ? bid_aid + 1 : bac_aid;
+		check(bac_aid <= stt_aid);
+		for (u64 aid = stt_aid; aid <= prp_aid; aid++) {
+			check(aid >= bac_aid);
+			check(hst->bid_crv[aid - bac_aid] == (u64) -1);
+			hst->bid_crv[aid - bac_aid] = prp_val;
+		}	
+	}
+}
+
+/*
+ * Propagate ask curve values from @bac_aid + 1
+ * to @prp_aid.
+ */
+static inline void _ask_prp(
+	tb_lv1_hst *hst,
+	u64 bac_aid,
+	u64 ask_aid,
+	u64 prp_aid,
+	tb_lv1_tck *bst_ask
+)
+{
+	if (bac_aid <= prp_aid) {
+		const u64 prp_val = _bst_ask_val(bst_ask);
+		const u64 stt_aid = (ask_aid) ? ask_aid + 1 : bac_aid;
+		check(bac_aid <= stt_aid);
+		if (stt_aid <= prp_aid) {
+			tb_lv1_log("prp : bst_ask : val %U, aid [%U, %U], tim [%U, %U[.\n",
+				prp_val,
+				stt_aid - bac_aid, prp_aid - bac_aid,
+				stt_aid * hst->tim_res, (prp_aid + 1) * hst->tim_res
+			);
+		}
+		for (u64 aid = stt_aid; aid <= prp_aid; aid++) {
+			check(aid >= bac_aid);
+			check(hst->ask_crv[aid - bac_aid] == (u64) -1);
+			hst->ask_crv[aid - bac_aid] = prp_val;
+		}	
+	}
+}
+
 /********************
  * Bid / ask spread *
  ********************/
@@ -105,6 +164,7 @@ static inline u64 _to_hmp_end_tim(
 	 * level with a non-null volume. */ \
 	if (tck == prv_bst_bid) { \
 		tb_lv1_tck *oth = tck; \
+		debug("bid inv.\n"); \
 		bid_upd = 1; \
 		while (1) { \
 			ns_mapn_u64 *prv = ns_map_u64_fn_inr(&oth->tcks); \
@@ -128,6 +188,7 @@ static inline u64 _to_hmp_end_tim(
 	else if (tck == prv_bst_ask) { \
 		tb_lv1_tck *oth = tck; \
 		ask_upd = 1; \
+		debug("ask inv.\n"); \
 		while (1) { \
 			ns_mapn_u64 *nxt = ns_map_u64_fn_in(&oth->tcks); \
 			if (!nxt) { \
@@ -181,7 +242,7 @@ static inline u64 _to_hmp_end_tim(
 \
 		/* Determine if bid or ask, read the tick. */ \
 		const u8 is_ask = _is_ask(vol); \
-		debug("typ %d %s.\n", vol, is_ask ? "ask" : "bid"); \
+		/* debug("typ %d %s.\n", vol, is_ask ? "ask" : "bid"); */ \
 		const u64 tck_val = tck->tcks.val; \
 \
 		/* If is bid but was best ask, or
@@ -190,15 +251,15 @@ static inline u64 _to_hmp_end_tim(
 			(is_ask && (tck == hst->bst_bid_nam)) || \
 			((!is_ask) && (tck == hst->bst_ask_nam)) \
 		) { \
-			debug("inv oth\n"); \
+			/* debug("inv oth\n"); */ \
 			BAS_INV(tck, vol_nam, bst_bid_nam, bst_ask_nam); \
 		} \
 \
 		/* If bid, if price is superior to best bid, select as best bid. */ \
 		if (!is_ask) { \
-			debug("cdt %p "#bst_bid_nam" %p %U.\n", prv_bst_bid, (prv_bst_bid) ? prv_bst_bid->tcks.val : 0); \
+			/* debug("cdt %p "#bst_bid_nam" %p %U.\n", prv_bst_bid, (prv_bst_bid) ? prv_bst_bid->tcks.val : 0); */ \
 			if ((!prv_bst_bid) || (prv_bst_bid->tcks.val < tck_val)) { \
-				debug("bst %p "#bst_bid_nam" %U %d.\n", tck, tck->tcks.val, tck->vol_nam); \
+				/* debug("bst %p "#bst_bid_nam" %U %d.\n", tck, tck->tcks.val, tck->vol_nam); */ \
 				bid_upd = 1; \
 				hst->bst_bid_nam = tck; \
 			} \
@@ -208,7 +269,7 @@ static inline u64 _to_hmp_end_tim(
 		 * ask, select as best ask. */ \
 		else { \
 			if ((!prv_bst_ask) || (prv_bst_ask->tcks.val > tck_val)) { \
-				debug("bst %p "#bst_ask_nam" %U %d.\n", tck, tck->tcks.val, tck->vol_nam); \
+				/* debug("bst %p "#bst_ask_nam" %U %d.\n", tck, tck->tcks.val, tck->vol_nam); */ \
 				ask_upd = 1; \
 				hst->bst_ask_nam = tck; \
 			} \
@@ -296,17 +357,10 @@ static inline void _hst_bas_max_upd(
 	/*
 	 * If best bid update :
 	 */
-	if (bid_upd) {
+	if (bid_upd) { 
 
 		/* Propagate previous best value until max time - 1. */
-		if (bac_aid <= prp_aid) {
-			const u64 prp_val = _bst_bid_val(prv_bst_bid);
-			const u64 stt_aid = (bac_aid < (bid_aid + 1)) ? (bid_aid + 1) : bac_aid;
-			for (u64 aid = stt_aid; aid <= prp_aid; aid++) {
-				check(aid >= bac_aid);
-				bid_crv[aid - bac_aid] = prp_val;
-			}	
-		}
+		_bid_prp(hst, bac_aid, bid_aid, prp_aid, prv_bst_bid);
 
 		/* Select the best bid for the current aid.
 		 * If the previous value affected the current
@@ -332,16 +386,10 @@ static inline void _hst_bas_max_upd(
 	 * If best ask update :
 	 */
 	if (ask_upd) {
+		debug("ask upd %U %U %U %U.\n", bac_aid, ask_aid - bac_aid, prp_aid - bac_aid, _bst_ask_val(prv_bst_ask));
 
-		/* Propagate previous best value until max time - 1. */
-		if (bac_aid <= prp_aid) {
-			const u64 prp_val = _bst_ask_val(prv_bst_ask);
-			const u64 stt_aid = (bac_aid < (ask_aid + 1)) ? (ask_aid + 1) : bac_aid;
-			for (u64 aid = stt_aid; aid <= prp_aid; aid++) {
-				check(aid >= bac_aid);
-				ask_crv[aid - bac_aid] = prp_val;
-			}	
-		}
+		/* Propagate ask values. */
+		_ask_prp(hst, bac_aid, ask_aid, prp_aid, prv_bst_ask);
 
 		/* Select the best ask for the current aid.
 		 * If the previous value affected the current
@@ -406,7 +454,7 @@ static inline void _hst_bac_mov(
 
 	/* Set new values to -1 in debug mode. */
 	#ifdef DEBUG
-	tb_lv1_log("bac_mov : rst : [%U, %U[.\n", len - shf_bnd, shf_bnd);
+	tb_lv1_log("bac_mov : rst : [%U, %U[.\n", len - shf_bnd, len);
 	ns_mem_set(bid_crv + len - shf_bnd, 0xff, shf_bnd * sizeof(u64)); 
 	ns_mem_set(ask_crv + len - shf_bnd, 0xff, shf_bnd * sizeof(u64)); 
 	check(((u64 *) bid_crv)[len - shf_bnd] == (u64) -1);
@@ -822,6 +870,7 @@ tb_lv1_hst *tb_lv1_ctr(
 
 	/* Reset times. */
 	hst->tim_cur = 0;
+	hst->tim_rnc = 0;
 	hst->tim_hmp = 0;
 	hst->tim_max = 0;
 	hst->tim_end = 0;
@@ -1079,6 +1128,30 @@ void tb_lv1_prc(
 
 	/* Require a prepared history. */
 	assert(hst->tim_cur);
+	assert(hst->tim_end);
+
+	/* Propagate best bid / ask until last cells of
+	 * bid / ask curves. */ 
+	if (hst->bac_nb) {
+		const u64 bac_aid = hst->bac_aid;
+		const u64 bid_aid = hst->bid_aid;
+		const u64 ask_aid = hst->ask_aid;
+		const u64 prp_aid = (hst->tim_end - 1) / hst->tim_res;
+		assert(bid_aid <= prp_aid);
+		assert(ask_aid <= prp_aid);
+		_bid_prp(hst, bac_aid, bid_aid, prp_aid, hst->bst_max_bid);
+		_ask_prp(hst, bac_aid, ask_aid, prp_aid, hst->bst_max_ask);
+		hst->bid_aid = prp_aid;
+		hst->ask_aid = prp_aid;
+	}
+
+	/* Determine the re-anchor time. */
+	u64 tim_rnc = (u64) -1;
+	if (hst->hmp_shf_tim) {
+		tim_rnc = hst->tim_hmp - hst->tim_res;
+		assert(hst->tim_rnc < tim_rnc);
+		assert(tim_rnc < hst->tim_cur);
+	}
 
 	/* Determine the first node to update. */
 	tb_lv1_upd *upd = hst->upd_prc;
@@ -1090,9 +1163,18 @@ void tb_lv1_prc(
 	/* Process all updates until the first >= tim_cur. 
 	 * If no updates, stop here. */
 	const u64 tim_cur = hst->tim_cur;
+	u64 tck_ref_new = 0;
 	while (upd && (upd->tim < tim_cur)) {
-		check(upd->tim >= hst->tim_prc);
-		hst->tim_prc = upd->tim;
+		const u64 upd_tim = upd->tim;
+		check(upd_tim >= hst->tim_prc);
+		hst->tim_prc = upd_tim;
+
+		/* If we found an update after the reanchor time,
+		 * we should reanchor now, compute the new tick ref. */
+		if (upd_tim >= tim_rnc) { 
+			tck_ref_new = _tck_ref_cpt(hst);
+			tim_rnc = (u64) -1;
+		}
 
 		/* Insert the update at the end of its price list. */
 		tb_lv1_tck *tck = upd->tck;
@@ -1106,6 +1188,12 @@ void tb_lv1_prc(
 		ns_sls *sls = upd->upds_hst.next; 
 		upd = hst->upd_prc = (sls ? ns_cnt_of(sls, tb_lv1_upd, upds_hst) : 0);
 
+	}
+	
+	/* If reanchor was needed but no update was after it,
+	 * reanchor now. */
+	if (tim_rnc != (u64) -1) {
+		tck_ref_new = _tck_ref_cpt(hst);
 	}
 
 	/* Cache the previous heatmap price range. */
@@ -1122,13 +1210,11 @@ void tb_lv1_prc(
 	/* Re-anchor if needed. */
 	if (hst->hmp_shf_tim) {
 
-#error THERE IS AN ERROR HERE. WE RE-ANCHOR BASED ON THE STATE AT THE CURRENT TICK.
-#error RATHER, WE MUST COMPUTE THE NEW REF DURING PROCESSING, WHEN WE PASS THE RE-ANCHORING POINT.
-#error I believe that this can be achieved with the current update processing.
+		/* New tick ref should have been computed. */
+		assert(tck_ref_new != (u64) -1);
 
 		/* Determine the new reference price. */
 		const u64 tck_ref_cur = hst->tck_ref;
-		const u64 tck_ref_new = _tck_ref_cpt(hst);
 		check(tck_ref_cur >= (hst->hmp_dim_tck >> 1));
 		check(tck_ref_new >= (hst->hmp_dim_tck >> 1));
 
