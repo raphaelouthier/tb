@@ -28,6 +28,15 @@ static void _spl_ini(
 )
 {
 	tb_tst_lv1_gen_spl *spl = ns_cnt_of(gen, tb_tst_lv1_gen_spl, gen);
+	assert((tck_min <= spl->bid0) && (spl->bid0 < tck_max));
+	assert((tck_min <= spl->bid1) && (spl->bid1 < tck_max));
+	assert((tck_min <= spl->ask0) && (spl->ask0 < tck_max));
+	assert((tck_min <= spl->ask1) && (spl->ask1 < tck_max));
+	spl->ref_vol = ref_vol;
+	spl->tck_min = tck_min;
+	spl->tck_max = tck_max;
+	spl->cnt = assert(spl->prd); 
+	spl->is0 = 0;
 }
 
 /*
@@ -35,10 +44,7 @@ static void _spl_ini(
  */
 static void _spl_tck_upd(
 	tb_tst_lv1_gen *gen
-)
-{
-	tb_tst_lv1_gen_spl *spl = ns_cnt_of(gen, tb_tst_lv1_gen_spl, gen);
-}
+) {}
 
 /*
  * Orderbook update.
@@ -49,6 +55,25 @@ static void _spl_obk_upd(
 )
 {
 	tb_tst_lv1_gen_spl *spl = ns_cnt_of(gen, tb_tst_lv1_gen_spl, gen);
+	u64 bid_set = spl->bid1;
+	u64 bid_clr = spl->bid0;
+	u64 ask_set = spl->ask1;
+	u64 ask_clr = spl->ask0;
+	if (spl->is0) {
+		_swap(bid_set, bid_clr);
+		_swap(ask_set, ask_clr);
+	}
+	obk[bid_clr - spl->tck_min] = 0;
+	obk[bid_set - spl->tck_min] = -spl->ref_vol;
+	obk[ask_clr - spl->tck_min] = 0;
+	obk[ask_set - spl->tck_min] = spl->ref_vol;
+	SAFE_DECR(spl->cnt);
+	if (!spl->cnt) {
+		spl->is0 = !spl->is0;
+		spl->cnt = spl->prd;
+	}
+
+	
 }
 
 /*
@@ -57,16 +82,17 @@ static void _spl_obk_upd(
 static u64 _spl_skp(
 	tb_tst_lv1_gen *gen,
 	u64 itr_idx
-)
-{
-	return 0;
-}
+) {return 0;}
 
 /*
  * Construct.
  */
 tb_tst_lv1_gen_spl *tb_tst_lv1_gen_spl_ctr(
-	void
+	u64 bid0,
+	u64 bid1,
+	u64 ask0,
+	u64 ask1,
+	u64 prd
 )
 {
 	nh_all__(tb_tst_lv1_gen_spl, spl);
@@ -75,6 +101,11 @@ tb_tst_lv1_gen_spl *tb_tst_lv1_gen_spl_ctr(
 	spl->gen.tck_upd = &_spl_tck_upd;
 	spl->gen.obk_upd = &_spl_obk_upd;
 	spl->gen.skp = &_spl_skp;
+	spl->bid0 = bid0;
+	spl->bid1 = bid1;
+	spl->ask0 = ask0;
+	spl->ask1 = ask1;
+	spl->prd = prd;
 	return spl; 
 }
 

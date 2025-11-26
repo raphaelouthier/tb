@@ -1075,6 +1075,8 @@ void tb_lv1_prc(
 )
 {
 
+	tb_lv1_log("prc %U.\n", hst->hmp_shf_tim);
+
 	/* Require a prepared history. */
 	assert(hst->tim_cur);
 
@@ -1120,6 +1122,10 @@ void tb_lv1_prc(
 	/* Re-anchor if needed. */
 	if (hst->hmp_shf_tim) {
 
+#error THERE IS AN ERROR HERE. WE RE-ANCHOR BASED ON THE STATE AT THE CURRENT TICK.
+#error RATHER, WE MUST COMPUTE THE NEW REF DURING PROCESSING, WHEN WE PASS THE RE-ANCHORING POINT.
+#error I believe that this can be achieved with the current update processing.
+
 		/* Determine the new reference price. */
 		const u64 tck_ref_cur = hst->tck_ref;
 		const u64 tck_ref_new = _tck_ref_cpt(hst);
@@ -1127,6 +1133,7 @@ void tb_lv1_prc(
 		check(tck_ref_new >= (hst->hmp_dim_tck >> 1));
 
 		//assert(0, "tck_ref old %U new %U.\n", tck_ref_cur, tck_ref_new);
+		tb_lv1_log("rnc : %U -> %U.\n", tck_ref_cur, tck_ref_new);
 
 		/* Move heatmap data. */
 		const s64 hmp_shf_tck = (s64) tck_ref_new - (s64) tck_ref_cur;

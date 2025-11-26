@@ -26,7 +26,56 @@ struct tb_tst_lv1_gen_spl {
 	/* Generator base. */
 	tb_tst_lv1_gen gen;
 
+	/*
+	 * Parameters.
+	 */
+
+	/* Bid tictick*/
+	u64 bid0;
+
+	/* Bid tick 1. */
+	u64 bid1;
+
+	/* Ask tick 0. */
+	u64 ask0;
+
+	/* Ask tick 1. */
+	u64 ask1;
+
+	/* Alternation period. */
+	u64 prd;
+
+	/*
+	 * Context.
+	 */
+	
+	/* Min tick. */
+	u64 tck_min;
+
+	/* Max tick. */
+	u64 tck_max;
+
+	/* Reference volume. */
+	f64 ref_vol;
+
+	/* Count until shift. */
+	u64 cnt;
+
+	/* Price 0 or price 1 ? */
+	u8 is0;
+
 };
+
+/*
+ * Construct.
+ */
+tb_tst_lv1_gen_spl *tb_tst_lv1_gen_spl_ctr(
+	u64 bid0,
+	u64 bid1,
+	u64 ask0,
+	u64 ask1,
+	u64 prd
+);
 
 /**************************
  * Fully random generator *

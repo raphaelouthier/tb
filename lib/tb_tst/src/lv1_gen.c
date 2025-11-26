@@ -400,7 +400,6 @@ void tb_tst_lv1_upds_gen(
 	assert(!(tim_end % (tim_stp * tim_inc)));
 	u64 itr_idx = 0;
 	while (tim_cur < tim_end) {
-		debug("itr %U.\n", itr_idx);
 
 		/* Let some time pass. */
 		const u8 end = _gen_skp(ctx, gen, itr_idx, &tim_cur, tim_inc, tim_end, obk_cur);
@@ -410,9 +409,9 @@ void tb_tst_lv1_upds_gen(
 
 		/* Determine aids. */
 		check(tim_cur != 0);
-		assert(tim_cur > tim_stt);
+		assert(tim_cur >= tim_stt);
 		const u64 aid_lst = _tim_to_aid(ctx, tim_lst);
-		const u64 aid_prv = _tim_to_aid(ctx, tim_cur - 1);
+		const u64 aid_prv = (tim_cur == tim_stt) ? 0 : _tim_to_aid(ctx, tim_cur - 1);
 		const u64 aid_cur = _tim_to_aid(ctx, tim_cur);
 		const u64 aid_nxt = _tim_to_aid(ctx, tim_cur + tim_stp);
 		assert(aid_lst <= aid_prv);
