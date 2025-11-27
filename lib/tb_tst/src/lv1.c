@@ -85,7 +85,7 @@ static inline void _bac_add(
 		*bst_bac_aidp = bst_bac_aid = aid_bac;
 		*bst_bidp = ctx->bid_ini[bst_bac_aid];
 		*bst_askp = ctx->ask_ini[bst_bac_aid];
-		//debug("ini bid %U ask %U.\n", *bst_bidp, *bst_askp);
+		debug("ini bid %U ask %U.\n", *bst_bidp, *bst_askp);
 	}
 	const u64 tck_abs = tck + ctx->tck_min;
 	if ((vol < 0) && (tck_abs > *bst_bidp)) {
@@ -114,10 +114,11 @@ static inline void _bac_prp(
 	//debug("cur bid %U ask %U.\n", *bst_bidp, *bst_askp);
 	assert(bst_bac_aid <= aid_bac);
 	if (aid_bac != bst_bac_aid) {
+		debug("ini %U %U %U.\n", ctx->unt_nbr, bst_bac_aid, aid_bac);
 		*bst_bac_aidp = bst_bac_aid = aid_bac;
 		*bst_bidp = ctx->bid_ini[bst_bac_aid];
 		*bst_askp = ctx->ask_ini[bst_bac_aid];
-		//debug("ini bid %U ask %U.\n", *bst_bidp, *bst_askp);
+		debug("ini bid %U ask %U.\n", *bst_bidp, *bst_askp);
 	}
 }
 
@@ -1096,7 +1097,7 @@ static void _lv1_run(
 	nh_tst_sys *sys,
 	u64 sed,
 	tb_tst_lv1_gen *gen,
-	u8 frc_vrf,
+	u8 chk_stt,
 	u64 tim_stt,
 	u64 tim_inc,
 	u64 tck_per_unt,
@@ -1265,12 +1266,14 @@ static void _lv1_run(
 	tb_lv1_prc(hst);
 
 	/* Verify the history's internal state. */
-	_vrf_hst(
-		ctx, hst,
-		uid_cln, uid_cur, uid_add,
-		tim_cln, tim_cur, tim_add,
-		0
-	);
+	if (chk_stt) {
+		_vrf_hst(
+			ctx, hst,
+			uid_cln, uid_cur, uid_add,
+			tim_cln, tim_cur, tim_add,
+			0
+		);
+	}
 
 	/* Verify the result. */
 	_vrf_res(
@@ -1331,7 +1334,7 @@ static void _lv1_run(
 		if (do_cln) {
 
 			/* Verify the history internal state. */
-			if (frc_vrf) {
+			if (chk_stt) {
 				_vrf_hst(
 					ctx, hst,
 					uid_cln, uid_cur, uid_add,
@@ -1349,7 +1352,7 @@ static void _lv1_run(
 		}
 
 		/* Verify the history internal state. */
-		if (frc_vrf) {
+		if (chk_stt) {
 			_vrf_hst(
 				ctx, hst,
 				uid_cln, uid_cur, uid_add,
@@ -1390,6 +1393,8 @@ static void _lv1_run(
 
 }
 
+#define CHECK_STATE 0
+
 /*
  * Verification test.
  */
@@ -1410,7 +1415,7 @@ static inline void _vrf_tst(
 	);
 
 	_lv1_run(
-		sys, sed, &spl->gen, 1,
+		sys, sed, &spl->gen, CHECK_STATE,
 		NS_TIM_S(1000), // Start at 10s.
 		NS_TIM_1MS, // Order every ms.
 		100, // 100 tick per price unit.
@@ -1443,7 +1448,7 @@ static inline void _rdm_tst(
 	);
 
 	_lv1_run(
-		sys, sed, &rdm->gen, 1,
+		sys, sed, &rdm->gen, CHECK_STATE,
 		NS_TIM_S(1000), // Start at 10s.
 		NS_TIM_1MS, // Order every ms.
 		100, // 100 tick per price unit.

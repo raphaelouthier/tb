@@ -194,6 +194,10 @@ static inline void _bac_upd(
 	*prv_bst_ask = bst_ask;
 }
 
+/*
+ * Propagate BAC data until @aid_cur.
+ * @aid cur may be equal to @ctx->unt_nbr.
+ */
 static inline void _bac_prp(
 	tb_tst_lv1_ctx *ctx,
 	u64 aid_cur,
@@ -204,6 +208,9 @@ static inline void _bac_prp(
 	u64 *tck_refp
 )
 {
+
+	const u64 aid_max = ctx->unt_nbr;
+	assert((aid_cur != aid_max) || (aid_prv + 1 == aid_max));
 
 	/* If we changed cell : */
 	if (aid_lst != aid_cur) {
@@ -219,7 +226,7 @@ static inline void _bac_prp(
 		}
 
 		/* Initialize the current cell. */
-		if (aid_prv != aid_cur) {
+		if ((aid_cur != aid_max) && (aid_prv != aid_cur)) {
 			ctx->bid_arr[aid_cur] = 0;
 			ctx->ask_arr[aid_cur] = (u64) -1;
 		}
@@ -232,7 +239,9 @@ static inline void _bac_prp(
 		 * reference value up to this cell.
 		 */ 
 		for (u64 idx = aid_lst + 1; idx <= aid_cur; idx++) {
-			*tck_refp = ctx->ref_arr[idx] = _tck_ref(prv_bst_bid, prv_bst_ask, *tck_refp, ctx->hmp_dim_tck);
+			if (idx < aid_max) {
+				*tck_refp = ctx->ref_arr[idx] = _tck_ref(prv_bst_bid, prv_bst_ask, *tck_refp, ctx->hmp_dim_tck);
+			}
 		}
 
 	} else {
@@ -402,9 +411,6 @@ void tb_tst_lv1_upds_gen(
 
 		/* Let some time pass. */
 		const u8 end = _gen_skp(ctx, gen, itr_idx, &tim_cur, tim_inc, tim_end, obk_cur);
-		if (end) {
-			goto out;
-		}
 
 		/* Determine aids. */
 		check(tim_cur != 0);
@@ -416,14 +422,19 @@ void tb_tst_lv1_upds_gen(
 		assert(aid_lst <= aid_prv);
 		assert(aid_lst < unt_nbr);
 		assert(aid_prv < unt_nbr);
-		assert(aid_nxt < unt_nbr);
-		assert(aid_cur < unt_nbr);
+
+		/* Propagate bid-ask to the current cells. */
+		_bac_prp(ctx, aid_cur, aid_prv, aid_lst, prv_bst_bid, prv_bst_ask, &prv_ref);
 
 		/* Update the last time. */
 		tim_lst = tim_cur;
 
-		/* Propagate bid-ask to the current cells. */
-		_bac_prp(ctx, aid_cur, aid_prv, aid_lst, prv_bst_bid, prv_bst_ask, &prv_ref);
+		if (end) {
+			goto out;
+		}
+
+		assert(aid_nxt < unt_nbr);
+		assert(aid_cur < unt_nbr);
 
 		/* Generate the new current tick. */
 		(*(gen->tck_upd))(gen);

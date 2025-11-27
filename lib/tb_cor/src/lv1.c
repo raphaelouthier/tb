@@ -400,7 +400,10 @@ static inline void _hst_bas_max_upd(
 		const u64 cel_bst = ask_crv[new_aid - bac_aid];
 		const u64 crt_bst = _bst_ask_val(hst->bst_max_ask);
 		check(((cel_bst == (u64) -1) || (cel_bst >= crt_bst)) == (cel_bst >= crt_bst));
-		if ((cel_bst > crt_bst)) {
+		if (
+			(prp_aid != new_aid) ||
+			(cel_bst > crt_bst)
+		) {
 			ask_crv[new_aid - bac_aid] = crt_bst;
 		}
 
