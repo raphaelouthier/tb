@@ -35,7 +35,8 @@ static void _spl_ini(
 	spl->ref_vol = ref_vol;
 	spl->tck_min = tck_min;
 	spl->tck_max = tck_max;
-	spl->cnt = assert(spl->prd); 
+	assert(spl->prd);
+	spl->cnt = ((spl->phs) ? 0 : spl->prd) + spl->phs + 1; 
 	spl->is0 = 0;
 }
 
@@ -98,7 +99,8 @@ tb_tst_lv1_gen_spl *tb_tst_lv1_gen_spl_ctr(
 	u64 bid1,
 	u64 ask0,
 	u64 ask1,
-	u64 prd
+	u64 prd,
+	u64 phs
 )
 {
 	nh_all__(tb_tst_lv1_gen_spl, spl);
@@ -114,6 +116,7 @@ tb_tst_lv1_gen_spl *tb_tst_lv1_gen_spl_ctr(
 	spl->ask0 = ask0;
 	spl->ask1 = ask1;
 	spl->prd = prd;
+	spl->phs = phs;
 	return spl; 
 }
 

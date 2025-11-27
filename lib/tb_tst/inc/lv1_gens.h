@@ -51,6 +51,9 @@ struct tb_tst_lv1_gen_spl {
 	/* Alternation period. */
 	u64 prd;
 
+	/* Initial phase. */
+	u64 phs;
+
 	/*
 	 * Context.
 	 */
@@ -82,7 +85,8 @@ tb_tst_lv1_gen_spl *tb_tst_lv1_gen_spl_ctr(
 	u64 bid1,
 	u64 ask0,
 	u64 ask1,
-	u64 prd
+	u64 prd,
+	u64 phs
 );
 
 /**************************

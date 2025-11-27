@@ -78,11 +78,14 @@ static inline void _bac_add(
 	assert(tck < ctx->tck_nbr);
 	const u64 aid_bac = (tim - ctx->tim_stt) / ctx->aid_wid;
 	u64 bst_bac_aid = *bst_bac_aidp;
+	//debug("bac add tim %U aid_bac %U bst_bac_aid %U.\n", tim, aid_bac, bst_bac_aid);
+	//debug("cur bid %U ask %U.\n", *bst_bidp, *bst_askp);
 	assert(bst_bac_aid <= aid_bac);
 	if (aid_bac != bst_bac_aid) {
 		*bst_bac_aidp = bst_bac_aid = aid_bac;
 		*bst_bidp = ctx->bid_ini[bst_bac_aid];
 		*bst_askp = ctx->ask_ini[bst_bac_aid];
+		//debug("ini bid %U ask %U.\n", *bst_bidp, *bst_askp);
 	}
 	const u64 tck_abs = tck + ctx->tck_min;
 	if ((vol < 0) && (tck_abs > *bst_bidp)) {
@@ -90,7 +93,32 @@ static inline void _bac_add(
 	} else if ((vol > 0) && (tck_abs < *bst_askp)) {
 		*bst_askp = tck_abs;
 	}
+	//debug("new bid %U ask %U.\n", *bst_bidp, *bst_askp);
 	check(*bst_askp >= ctx->tck_min);
+}
+
+/*
+ * Update best bid / ask state to reflect the add time.
+ */
+static inline void _bac_prp(
+	tb_tst_lv1_ctx *ctx,
+	u64 tim,
+	u64 *bst_bac_aidp,
+	u64 *bst_bidp,
+	u64 *bst_askp
+)
+{
+	const u64 aid_bac = (tim - 1 - ctx->tim_stt) / ctx->aid_wid;
+	u64 bst_bac_aid = *bst_bac_aidp;
+	//debug("bac add tim %U aid_bac %U bst_bac_aid %U.\n", tim, aid_bac, bst_bac_aid);
+	//debug("cur bid %U ask %U.\n", *bst_bidp, *bst_askp);
+	assert(bst_bac_aid <= aid_bac);
+	if (aid_bac != bst_bac_aid) {
+		*bst_bac_aidp = bst_bac_aid = aid_bac;
+		*bst_bidp = ctx->bid_ini[bst_bac_aid];
+		*bst_askp = ctx->ask_ini[bst_bac_aid];
+		//debug("ini bid %U ask %U.\n", *bst_bidp, *bst_askp);
+	}
 }
 
 /*
@@ -117,7 +145,7 @@ static inline void _upds_add_ini(
 	u64 tim;
 	while (
 		(uid_add < ctx->upd_nbr) &&
-		((tim = upds[uid_add].tim) <= tim_add)
+		((tim = upds[uid_add].tim) < tim_add)
 	) {
 
 		/* Add. */
@@ -127,9 +155,10 @@ static inline void _upds_add_ini(
 		const u64 tck = _prc_to_tck(ctx, prc); 
 
 		/* Incorporate in best bid / ask. */
+		//debug("add ini %U %U %d.\n", tim, tck, vol);
 		_bac_add(ctx, tck, vol, tim, bst_bac_aidp, bst_bidp, bst_askp);
 
-		debug("%U %U.\n", *bst_bidp, *bst_askp);
+		//debug("%U %U.\n", *bst_bidp, *bst_askp);
 
 		/* Update counters. */
 		uid_add++;
@@ -148,6 +177,10 @@ static inline void _upds_add_ini(
 		tb_lv1_add(hst, i, tims, prcs, vols);
 	}
 
+	/* Update bid/ask data to reflect the add time. */
+	_bac_prp(ctx, tim_add, bst_bac_aidp, bst_bidp, bst_askp);
+
+
 	*uid_addp = uid_add;
 
 }
@@ -155,7 +188,8 @@ static inline void _upds_add_ini(
 
 #define UPD_GEN_STPS_NB 6
 static u64 tim_add_inc_stps[UPD_GEN_STPS_NB] = {
-	1, 1, 1, 2, 3
+	//1, 1, 1, 2, 2, 3,
+	1, 1, 1, 1, 1, 1,
 };
 
 /*
@@ -195,7 +229,7 @@ static inline void _upds_add(
 	u64 gen_nbr = 0;
 	while (uid_add < ctx->upd_nbr) {
 		const u64 tim = ctx->upds[uid_add].tim; 
-		debug("%U %U.\n", tim_add, tim);
+		//debug("%U %U.\n", tim_add, tim);
 		if (tim_add <= tim) break;
 
 		/* Add to the arrays. */
@@ -212,6 +246,7 @@ static inline void _upds_add(
 		}
 
 		/* Incorporate in best bid / ask. */
+		//debug("add %U %U %d.\n", tim, tck, vol);
 		_bac_add(ctx, tck, vol, tim, bst_bac_aidp, bst_bidp, bst_askp);
 
 		uid_add++;
@@ -223,6 +258,9 @@ static inline void _upds_add(
 	if (gen_nbr) {
 		tb_lv1_add(hst, gen_nbr, tims, prcs, vols);
 	}
+
+	/* Update bid/ask data to reflect the add time. */
+	_bac_prp(ctx, tim_add, bst_bac_aidp, bst_bidp, bst_askp);
 
 	/* Report the new add UID. */
 	*uid_addp = uid_add;
@@ -411,6 +449,7 @@ static inline void _vrf_hst(
 	u8 did_cln
 )
 {
+	assert(tim_cur);
 
 	/* First, check our own data. */
 	const u64 upd_nbr = ctx->upd_nbr;
@@ -424,7 +463,6 @@ static inline void _vrf_hst(
 	assert((uid_cur <= upd_nbr) || (ctx->upds[uid_cur].tim >= tim_cur));
 	assert((uid_add == upd_nbr) || (ctx->upds[uid_add].tim >= tim_add));
 	assert((!did_cln) || (uid_cln + 1 >= upd_nbr) || (ctx->upds[uid_cln + 1].tim > tim_cln)); 
-	assert((uid_cur + 1 >= upd_nbr) || (ctx->upds[uid_cur + 1].tim > tim_cur)); 
 
 	/*
 	 * First, check the full update sequence and verify that :
@@ -432,43 +470,45 @@ static inline void _vrf_hst(
 	 * - every update is associated with the correct tick.
 	 * - every update is or is not in its tick list as expected.
 	 */
-	tb_lv1_upd *upd;
 	u64 idx = 0;
 	u64 max = uid_add - uid_cln;
 	const u64 tck_min = ctx->tck_min; 
-	ns_slsh_fe(upd, &hst->upds_hst, upds_hst) {
-		tb_tst_lv1_upd *src = ctx->upds + uid_cln + idx;
+	{
+		tb_lv1_upd *upd;
+		ns_slsh_fe(upd, &hst->upds_hst, upds_hst) {
+			tb_tst_lv1_upd *src = ctx->upds + uid_cln + idx;
 
-		/* Check the index. */
-		assert(idx < max, "update sequence mismatch : too many updates.\n");
+			/* Check the index. */
+			assert(idx < max, "update sequence mismatch : too many updates.\n");
 
-		/* Check data. */
-		const f64 prc = src->prc;
-		const u64 tck = _prc_to_tck(ctx, prc);
-		assert(
-			(upd->tck->tcks.val == tck_min + tck) &&
-			(upd->tim == src->tim) &&
-			(upd->vol == src->vol),
-			"update sequence mismatch at index %U/%U (uid %U/%U) :\n"
-			"\texp (tim : %U, vol : %d, tck : %U (prc : %d)),\n"
-			"\tgot (tim : %U, vol : %d, tck : %U).\n",
-			idx, max, uid_cln + idx, uid_add,
-			src->tim, src->vol, tck_min + tck, prc,
-			upd->tim, upd->vol, upd->tck->tcks.val
-		);
+			/* Check data. */
+			const f64 prc = src->prc;
+			const u64 tck = _prc_to_tck(ctx, prc);
+			assert(
+				(upd->tck->tcks.val == tck_min + tck) &&
+				(upd->tim == src->tim) &&
+				(upd->vol == src->vol),
+				"update sequence mismatch at index %U/%U (uid %U/%U) :\n"
+				"\texp (tim : %U, vol : %d, tck : %U (prc : %d)),\n"
+				"\tgot (tim : %U, vol : %d, tck : %U).\n",
+				idx, max, uid_cln + idx, uid_add,
+				src->tim, src->vol, tck_min + tck, prc,
+				upd->tim, upd->vol, upd->tck->tcks.val
+			);
 
-		/* Check that the update's list state is correct. */
-		if ((upd->tim < tim_cur) != (!ns_dls_empty(&upd->upds_tck))) {
-			if (upd->tim < tim_cur) {
-				assert(!ns_dls_empty(&upd->upds_tck), "update < current time not in tick list.");
-			} else {
-				assert(ns_dls_empty(&upd->upds_tck), "update >+ current time in tick list.");
+			/* Check that the update's list state is correct. */
+			if ((upd->tim < tim_cur) != (!ns_dls_empty(&upd->upds_tck))) {
+				if (upd->tim < tim_cur) {
+					assert(!ns_dls_empty(&upd->upds_tck), "update < current time not in tick list.");
+				} else {
+					assert(ns_dls_empty(&upd->upds_tck), "update >+ current time in tick list.");
+				}
+				assert(0, "should have asserted.\n");
 			}
-			assert(0, "should have asserted.\n");
-		}
 
-		/* Reiterate. */
-		idx++;
+			/* Reiterate. */
+			idx++;
+		}
 	}
 	assert(idx == max, "not enough updates in history : expected %U, got %U.\n", idx, max);
 
@@ -640,6 +680,264 @@ static inline void _vrf_hst(
 	assert((bst_cur_ask == (u64) -1) || (hst->bst_cur_ask->tcks.val == bst_cur_ask));
 	assert((bst_max_ask == (u64) -1) || (hst->bst_max_ask->tcks.val == bst_max_ask));
 
+	
+	/*
+	 * Verify the bid / ask curve.
+	 */
+
+	debug("Verifying the bid/ask curve.\n");
+
+	/* Now that the history's state is verified, build an
+	 * orderbook at the current time using @hst. */
+	f64 *obk = ctx->obk;
+	ns_mem_rst(obk, ctx->tck_nbr * sizeof(f64));
+	ns_map_fe(tck, &hst->tcks, tcks, u64, in) {
+		u64 tck_val = tck->tcks.val;
+		check(tck_val >= ctx->tck_min);
+		check(tck_val < ctx->tck_min + ctx->tck_nbr);
+		if (tck->vol_cur) obk[tck_val - ctx->tck_min] = tck->vol_cur; 
+	}
+
+	/* Incorporate all updates before the bac time. */
+	const u64 tim_bac = hst->tim_hmp;
+	debug("bac : %U -> %U.\n", tim_bac, hst->bac_nb * hst->tim_res);
+	debug("end : %U.\n", hst->tim_end);
+	const u64 aid_bac = (tim_bac - ctx->tim_stt) / ctx->aid_wid;
+	u64 uid = uid_cur;
+	u64 tim_fst;
+	for (; uid <= uid_add; uid++) {
+		tb_tst_lv1_upd *src = (uid == uid_add) ? 0 : ctx->upds + uid;
+		tim_fst = (src) ? src->tim : tim_add;
+		assert(tim_cur <= tim_fst);
+		assert(tim_fst <= tim_add);
+		if (tim_fst > tim_bac) break;
+
+		/* Read the tick. */
+		const u64 tck_val = tck_min + _prc_to_tck(ctx, src->prc);
+		check(tck_val >= ctx->tck_min);
+		check(tck_val < ctx->tck_min + ctx->tck_nbr);
+		obk[tck_val - ctx->tck_min] = src->vol;
+	}
+
+	/* Best bids and best asks at current update. */
+	u64 bst_bid;
+	u64 bst_ask;
+	#define _get_bsts() ({\
+		bst_bid = 0; bst_ask = (u64) -1; \
+		for (u64 i = 0; i < ctx->tck_nbr; i++) { \
+			const f64 vol = obk[i]; \
+			debug("%U : %d.\n", i, vol); \
+			if (vol == 0) continue; \
+			const u64 abs_val = ctx->tck_min + i; \
+			const u8 is_bid = vol < 0; \
+			if (is_bid) bst_bid = abs_val; \
+			else if (bst_ask == (u64) -1) bst_ask = abs_val; \
+		} \
+		assert(bst_bid < bst_ask); \
+		debug("%I : %I\n", bst_bid, bst_ask); \
+	})
+	_get_bsts();
+
+	/* Maintain a local best bid / ask for the current cell. */
+	u64 tim_prv = tim_fst;
+	u64 aid_bst = (tim_bac - ctx->tim_stt) / ctx->aid_wid;
+	u64 aid_bst_bid = bst_bid;
+	u64 aid_bst_ask = bst_ask;
+	u64 lst_bid = bst_bid;
+	u64 lst_ask = bst_ask;
+	
+	/* Now, incorporate all bac updates until @uid_add[,
+	 * and whenever we change time, verify that the bid-ask
+	 * curve was right. */
+	/* We iterate INCLUDING uid_add but never access it.
+	 * Rather, we detect it and force the cleanup path when
+	 * we do. This allows us to use the same check path. */
+	u64 nxt_chk = aid_bac;
+	for (; uid <= uid_add; uid++) {
+
+		/* Read the time.
+		 * If no more updates, take the verif path once. */
+		tb_tst_lv1_upd *src = (uid == uid_add) ? 0 : ctx->upds + uid;
+		u64 tim_upd = (src) ? src->tim : tim_add;
+		assert(tim_bac < tim_upd);
+		assert(tim_upd <= tim_add);
+
+		/* If we completed an update stride : */
+		u8 has_chk = 0;
+		if ((tim_upd != tim_prv)) {
+
+			/* Determine aids. */
+			const u64 aid_prv = (tim_prv - ctx->tim_stt) / ctx->aid_wid;
+			debug("complete %U %U.\n", tim_prv, aid_prv);
+			debug("lst : %I %I.\n", lst_bid, lst_ask);
+
+			/* Determine the best bid/ask. */
+			_get_bsts();
+
+			/* The best bid and best ask must reflect @hst's
+			 * bid ask curve. */
+			if (aid_prv >= aid_bac) {
+				assert(bst_bid <= hst->bid_crv[aid_prv - aid_bac],
+					"%I > %I, [%U, %U]",
+					bst_bid, hst->bid_crv[aid_prv - aid_bac],
+					ctx->tim_stt + aid_prv * ctx->aid_wid, ctx->tim_stt + (aid_prv + 1) * ctx->aid_wid
+				);
+				assert(bst_ask >= hst->ask_crv[aid_prv - aid_bac],
+					"%I != %I, [%U, %U]",
+					bst_ask, hst->ask_crv[aid_prv - aid_bac],
+					ctx->tim_stt + aid_prv * ctx->aid_wid, ctx->tim_stt + (aid_prv + 1) * ctx->aid_wid
+				);
+			}
+
+			/* If we changed cell : */
+			if (aid_prv != aid_bst) {
+
+				debug("cel change %U -> %U.\n", aid_bst, aid_prv);
+
+				/* The aggregate best bid and ask must be
+				 * exactly @hst's. */
+				if (aid_bst >= aid_bac) {
+					assert(aid_bst == nxt_chk, "%U != %U.\n", aid_bst, nxt_chk);
+					assert(aid_bst_bid == hst->bid_crv[aid_bst - aid_bac],
+						"%I != %I, [%U, %U]",
+						aid_bst_bid, hst->bid_crv[aid_bst - aid_bac],
+						ctx->tim_stt + aid_bst * ctx->aid_wid, ctx->tim_stt + (aid_bst + 1) * ctx->aid_wid
+					);
+					assert(aid_bst_ask == hst->ask_crv[aid_bst - aid_bac],
+						"%I != %I, [%U, %U]",
+						aid_bst_ask, hst->ask_crv[aid_bst - aid_bac],
+						ctx->tim_stt + aid_bst * ctx->aid_wid, ctx->tim_stt + (aid_bst + 1) * ctx->aid_wid
+					);
+					nxt_chk++;
+				}
+
+				/* Every cell in ]aid_bst, aid_prv[ was
+				 * using the same orderbook, and the best
+				 * bid / ask must match the oldest observed
+				 * at aid_bst.
+				 * aid_bst == -1 gracefully handled here. */
+				for (idx = aid_bst + 1; idx < aid_prv; idx++) {
+					if (idx >= aid_bac) {
+						assert(idx == nxt_chk, "%U != %U.\n", idx, nxt_chk);
+						assert(lst_bid == hst->bid_crv[idx - aid_bac],
+							"%I != %I, [%U, %U]",
+							lst_bid == hst->bid_crv[idx - aid_bac],
+							ctx->tim_stt + idx * ctx->aid_wid, ctx->tim_stt + (idx + 1) * ctx->aid_wid
+						);
+						assert(lst_ask == hst->ask_crv[idx - aid_bac],
+							"%I != %I, [%U, %U]",
+							lst_ask == hst->ask_crv[idx - aid_bac],
+							ctx->tim_stt + idx * ctx->aid_wid, ctx->tim_stt + (idx + 1) * ctx->aid_wid
+						);
+						nxt_chk++;
+					}
+				}
+
+				/* Report that we changed cell.
+				 * Propagate the last best only if 
+				 * the current update is not on the
+				 * cell's start time. */
+				aid_bst = aid_prv;
+				if (tim_prv == ((aid_prv * ctx->aid_wid) + ctx->tim_stt)) {
+					aid_bst_bid = 0;
+					aid_bst_ask = (u64) -1;
+				} else {
+					aid_bst_bid = lst_bid;
+					aid_bst_ask = lst_ask;
+				}
+
+			}
+			check(aid_bst != (u64) -1);
+			check(aid_bst == aid_prv);
+
+			debug("pre :\n");
+			debug("  bst : %U, %I - %I.\n", aid_bst, aid_bst_bid, aid_bst_ask);
+			debug("  lst : %I %I.\n", lst_bid, lst_ask);
+
+			/* Incorporate in the best bid / ask. */
+			if (bst_bid > aid_bst_bid) aid_bst_bid = bst_bid;
+			if (bst_ask < aid_bst_ask) aid_bst_ask = bst_ask;
+
+			/* Keep track of the last incorporated bests,
+			 * to check for propagation. */
+			lst_bid = bst_bid;
+			lst_ask = bst_ask;
+
+			debug("pst : \n");
+			debug("  bst : %U, %I - %I.\n", aid_bst, aid_bst_bid, aid_bst_ask);
+			debug("  lst : %I %I.\n", lst_bid, lst_ask);
+			
+			/* Update the previous time. */
+			tim_prv = tim_upd;
+		
+		}
+
+		/* If no more updates, exit. */
+		if (!src) {
+			break;
+		}
+
+		debug("UPD %U %U %d.\n", tim_upd, _prc_to_tck(ctx, src->prc), src->vol);
+
+		/* Read the tick. */
+		const u64 tck_val = tck_min + _prc_to_tck(ctx, src->prc);
+		check(tck_val >= ctx->tck_min);
+		check(tck_val < ctx->tck_min + ctx->tck_nbr);
+
+		/* Incorporate the update. */
+		obk[tck_val - ctx->tck_min] = src->vol;
+	}
+	assert(tim_prv == tim_add);
+	assert(aid_bst < aid_bac + ctx->bac_siz);
+
+	/*
+	 * Check the final cells after the last updates.
+	 */
+	debug("final checks.\n");
+	const u64 aid_max = aid_bac + ctx->bac_siz;
+
+	/* The aggregate best bid and ask must be
+	 * exactly @hst's. */
+	if (aid_bst >= aid_bac) {
+		assert(aid_bst == nxt_chk, "%U != %U.\n", aid_bst, nxt_chk);
+		assert(aid_bst_bid == hst->bid_crv[aid_bst - aid_bac],
+			"%I != %I, [%U, %U]",
+			aid_bst_bid, hst->bid_crv[aid_bst - aid_bac],
+			ctx->tim_stt + aid_bst * ctx->aid_wid, ctx->tim_stt + (aid_bst + 1) * ctx->aid_wid
+		);
+		assert(aid_bst_ask == hst->ask_crv[aid_bst - aid_bac],
+			"%I != %I, [%U, %U]",
+			aid_bst_ask, hst->ask_crv[aid_bst - aid_bac],
+			ctx->tim_stt + aid_bst * ctx->aid_wid, ctx->tim_stt + (aid_bst + 1) * ctx->aid_wid
+		);
+		nxt_chk++;
+	}
+
+	/* Every cell in ]aid_bst, aid_max[ was
+	 * using the same orderbook, and the best
+	 * bid / ask must match the oldest observed
+	 * at aid_bst.
+	 * aid_bst == -1 gracefully handled here. */
+	for (idx = aid_bst + 1; idx < aid_max; idx++) {
+		if (idx >= aid_bac) {
+			assert(idx == nxt_chk, "%U != %U.\n", idx, nxt_chk);
+			assert(lst_bid == hst->bid_crv[idx - aid_bac],
+				"%I != %I, [%U, %U]",
+				lst_bid == hst->bid_crv[idx - aid_bac],
+				ctx->tim_stt + idx * ctx->aid_wid, ctx->tim_stt + (idx + 1) * ctx->aid_wid
+			);
+			assert(lst_ask == hst->ask_crv[idx - aid_bac],
+				"%I != %I, [%U, %U]",
+				lst_ask == hst->ask_crv[idx - aid_bac],
+				ctx->tim_stt + idx * ctx->aid_wid, ctx->tim_stt + (idx + 1) * ctx->aid_wid
+			);
+			nxt_chk++;
+		}
+	}
+
+	/* Verify that we verified the entire bid-ask curve. */
+	assert(nxt_chk == aid_bac + ctx->bac_siz);
+
 }
 
 /*
@@ -664,7 +962,7 @@ static inline void _vrf_res(
 
 	/* Verify the heatmap reference. */
 	const u64 ref = hst->tck_ref;
-	const u64 aid_cur = (tim_cur - ctx->tim_stt) / ctx->aid_wid;
+	const u64 aid_cur = (tim_cur <= ctx->tim_stt) ? 0 : (tim_cur - 1 - ctx->tim_stt) / ctx->aid_wid;
 	assert(ref == ctx->ref_arr[aid_cur], "reference mismatch at time %U cell %U : expected %U, got %U.\n",
 		tim_cur, aid_cur, ctx->ref_arr[aid_cur], ref); 
 	
@@ -778,8 +1076,9 @@ static inline void _vrf_res(
 			aid_max, aid_max, bst_bid, bid[aid_max]
 		);
 		assert(ask[aid_max] == bst_ask,
-			"ask curve mismatch at index %U/%U (tim [%U, %U[ : expected %U got %U.\n",
+			"ask curve mismatch at index %U/%U (aid [%U, %U[ tim [%U, %U[) : expected %U got %U.\n",
 			aid_max, aid_max,
+			(hst->tim_hmp - ctx->tim_stt) / ctx->aid_wid + aid_max, (hst->tim_hmp - ctx->tim_stt) / ctx->aid_wid + (aid_max + 1), 
 			hst->tim_hmp + aid_max * ctx->aid_wid, hst->tim_hmp + (aid_max + 1) * ctx->aid_wid, 
 			bst_ask, ask[aid_max]
 		);
@@ -1092,40 +1391,47 @@ static void _lv1_run(
 }
 
 /*
- * Entrypoint for lv1 tests.
+ * Verification test.
  */
-void tb_tst_lv1(
+static inline void _vrf_tst(
 	nh_tst_sys *sys,
 	u64 sed,
-	u8 wrk_nb,
-	u8 run_prc
+	u64 prd,
+	u64 phs,
+	u8 bid,
+	u8 ask
 )
 {
-
-	/* Construct a test orderbook generator. */
+	assert(bid || ask);
 	tb_tst_lv1_gen_spl *spl = tb_tst_lv1_gen_spl_ctr(
-		0, 1,
+		bid, ask,
 		1000000, 1000001, 1000002, 1000003,
-		10
+		prd, phs
 	);
 
 	_lv1_run(
 		sys, sed, &spl->gen, 1,
-		NS_TIM_S(10), // Start at 10s.
+		NS_TIM_S(1000), // Start at 10s.
 		NS_TIM_1MS, // Order every ms.
 		100, // 100 tick per price unit.
-		1000, // 1000 time units.
-		37, // 37 tick.
+		150, // 150 time units.
+		7, // 7 tick.
 		10000, // prices start at 10000. 
 		100, // heatmap has 100 ticks.
 		100, // heatmap has 100 units.
-		200, // bac has 200 units.
+		10, // bac has 10 units.
 		10 // 10 increments per time unit. 
 	);
+}
 
-
-#if 0
-	/* Construct a random orderbook generator. */
+/*
+ * Random test.
+ */
+static inline void _rdm_tst(
+	nh_tst_sys *sys,
+	u64 sed
+)
+{
 	tb_tst_lv1_gen_rdm *rdm = tb_tst_lv1_gen_rdm_ctr(
 		43,
 		100,
@@ -1138,7 +1444,8 @@ void tb_tst_lv1(
 
 	_lv1_run(
 		sys, sed, &rdm->gen, 1,
-		NS_TIM_S(10), // Start at 10s.
+		NS_TIM_S(1000), // Start at 10s.
+		NS_TIM_1MS, // Order every ms.
 		100, // 100 tick per price unit.
 		1000, // 1000 time units.
 		37, // 37 tick.
@@ -1148,7 +1455,34 @@ void tb_tst_lv1(
 		200, // bac has 200 units.
 		10 // 10 increments per time unit. 
 	);
+}
 
-#endif
+/*
+ * Entrypoint for lv1 tests.
+ */
+void tb_tst_lv1(
+	nh_tst_sys *sys,
+	u64 sed,
+	u8 wrk_nb,
+	u8 run_prc
+)
+{
+	_rdm_tst(sys, sed);
 
+	assert(0);
+	_vrf_tst(sys, sed, 10, 0, 1, 0);
+	_vrf_tst(sys, sed, 10, 0, 0, 1);
+	_vrf_tst(sys, sed, 10, 0, 1, 1);
+	_vrf_tst(sys, sed, 10, 5, 1, 0);
+	_vrf_tst(sys, sed, 10, 5, 0, 1);
+	_vrf_tst(sys, sed, 10, 5, 1, 1);
+	_vrf_tst(sys, sed, 1, 0, 1, 0);
+	_vrf_tst(sys, sed, 1, 0, 0, 1);
+	_vrf_tst(sys, sed, 1, 0, 1, 1);
+	_vrf_tst(sys, sed, 30, 0, 1, 0);
+	_vrf_tst(sys, sed, 30, 0, 0, 1);
+	_vrf_tst(sys, sed, 30, 0, 1, 1);
+	_vrf_tst(sys, sed, 50, 0, 1, 1);
+	assert(0);
+	_rdm_tst(sys, sed);
 }

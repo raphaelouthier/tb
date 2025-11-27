@@ -335,7 +335,6 @@ void tb_tst_lv1_upds_gen(
 	ctx->upds = nh_all(ctx->upd_max * sizeof(tb_tst_lv1_upd));
 	ctx->upd_nbr = 0;
 
-
 	/* Generate the range. */
 	const u64 tck_min = ctx->tck_min = (u64) ((f64) (prc_min * prc_cfc));
 	const u64 tck_max = ctx->tck_max = tck_min + tck_nbr;
@@ -343,7 +342,7 @@ void tb_tst_lv1_upds_gen(
 
 	/* Allocate two orderbooks. */
 	u64 obk_siz = tck_nbr * sizeof(f64);
-	f64 *const obk_cur = nh_all(obk_siz);
+	f64 *const obk_cur = ctx->obk = nh_all(obk_siz);
 	f64 *const obk_prv = nh_all(obk_siz);
 
 	/* Allocate the bitmap. */
@@ -457,7 +456,6 @@ void tb_tst_lv1_upds_gen(
 	}
 
 	/* Release. */
-	nh_fre(obk_cur, obk_siz);
 	nh_fre(obk_prv, obk_siz);
 	nh_fre(bmp, bmp_siz);
 
@@ -476,6 +474,7 @@ void tb_tst_lv1_upds_del(
 )
 {
 	nh_fre(ctx->upds, ctx->upd_max * sizeof(tb_tst_lv1_upd));
+	nh_fre(ctx->obk, ctx->tck_nbr * sizeof(f64));
 	nh_fre(ctx->bid_arr, ctx->unt_nbr * sizeof(u64));
 	nh_fre(ctx->ask_arr, ctx->unt_nbr * sizeof(u64));
 	nh_fre(ctx->bid_ini, ctx->unt_nbr * sizeof(u64));

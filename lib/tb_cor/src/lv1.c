@@ -105,7 +105,7 @@ static inline void _bid_prp(
 {
 	if (bac_aid <= prp_aid) {
 		const u64 prp_val = _bst_bid_val(bst_bid);
-		const u64 stt_aid = (bid_aid) ? bid_aid + 1 : bac_aid;
+		const u64 stt_aid = (bac_aid <= bid_aid) ? bid_aid + 1 : bac_aid;
 		check(bac_aid <= stt_aid);
 		for (u64 aid = stt_aid; aid <= prp_aid; aid++) {
 			check(aid >= bac_aid);
@@ -129,7 +129,7 @@ static inline void _ask_prp(
 {
 	if (bac_aid <= prp_aid) {
 		const u64 prp_val = _bst_ask_val(bst_ask);
-		const u64 stt_aid = (ask_aid) ? ask_aid + 1 : bac_aid;
+		const u64 stt_aid = (bac_aid <= ask_aid) ? ask_aid + 1 : bac_aid;
 		check(bac_aid <= stt_aid);
 		if (stt_aid <= prp_aid) {
 			tb_lv1_log("prp : bst_ask : val %U, aid [%U, %U], tim [%U, %U[.\n",
@@ -164,7 +164,7 @@ static inline void _ask_prp(
 	 * level with a non-null volume. */ \
 	if (tck == prv_bst_bid) { \
 		tb_lv1_tck *oth = tck; \
-		debug("bid inv.\n"); \
+		/* debug("bid inv.\n"); */ \
 		bid_upd = 1; \
 		while (1) { \
 			ns_mapn_u64 *prv = ns_map_u64_fn_inr(&oth->tcks); \
@@ -188,7 +188,7 @@ static inline void _ask_prp(
 	else if (tck == prv_bst_ask) { \
 		tb_lv1_tck *oth = tck; \
 		ask_upd = 1; \
-		debug("ask inv.\n"); \
+		/* debug("ask inv.\n"); */ \
 		while (1) { \
 			ns_mapn_u64 *nxt = ns_map_u64_fn_in(&oth->tcks); \
 			if (!nxt) { \

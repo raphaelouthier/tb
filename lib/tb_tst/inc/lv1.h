@@ -170,6 +170,9 @@ struct tb_tst_lv1_ctx {
 	/* Updates array. */
 	tb_tst_lv1_upd *upds;
 
+	/* Scratch orderbook to play with. */
+	f64 *obk;
+
 	/* Bid array[unt_nbr]. */
 	u64 *bid_arr;
 
