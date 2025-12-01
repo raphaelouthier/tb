@@ -11,5 +11,6 @@
 #include <tb_tst/stg.h>
 #include <tb_tst/lv1.h>
 #include <tb_tst/lv1_gens.h>
+#include <tb_tst/lv1_vrf.h>
 
 #endif /* TB_TST_ALL_H */
