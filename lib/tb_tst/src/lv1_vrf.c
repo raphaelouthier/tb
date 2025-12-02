@@ -685,7 +685,9 @@ void tb_tst_lv1_vrf_hst_res(
 		const f64 *hmp_cmp = hmp + cnt * ctx->hmp_dim_tck;
 
 		/* Compare each value in the heatmap. */
-		for (u64 tck_idx = hmp_min; tck_idx < hmp_nbr; tck_idx++) {
+		u64 cnt = 0;
+		for (u64 tck_idx = hmp_min; tck_idx < hmp_min + hmp_nbr; tck_idx++) {
+			cnt++;
 
 			/* Read the value from the heatmap. */
 			const f64 hmp_val = hmp_cmp[tck_idx - hmp_min];
@@ -705,6 +707,7 @@ void tb_tst_lv1_vrf_hst_res(
 				src_val, hmp_val
 			);
 		}
+		assert(cnt == hst->hmp_dim_tck);
 
 	}
 
@@ -714,7 +717,9 @@ void tb_tst_lv1_vrf_hst_res(
 	const u64 div = (tim_cur - ctx->tim_stt) % ctx->aid_wid;
 	/* Compare each value in the heatmap. */
 	debug("%U %U.\n", hmp_min, hmp_nbr);
+	u64 cnt = 0;
 	for (u64 tck_idx = hmp_min; tck_idx < hmp_min + hmp_nbr; tck_idx++) {
+		cnt++;
 
 		/* If the tick is in the generation range, read from source.
 		 * Otherwise, the value is 0. */
@@ -735,6 +740,21 @@ void tb_tst_lv1_vrf_hst_res(
 			avg, hmp_cmp[tck_idx - hmp_min]
 		);
 	}
+	assert(cnt == hst->hmp_dim_tck);
+
+#error TODO FOR EVERY FOR LOOK KEEP TRACK OF A COUNTER AND CHECK THAT WE ITERATED FOR THE REQUIRED NUMBER OF STEPS.
+#error TODO FOR EVERY FOR LOOK KEEP TRACK OF A COUNTER AND CHECK THAT WE ITERATED FOR THE REQUIRED NUMBER OF STEPS.
+#error TODO FOR EVERY FOR LOOK KEEP TRACK OF A COUNTER AND CHECK THAT WE ITERATED FOR THE REQUIRED NUMBER OF STEPS.
+#error TODO FOR EVERY FOR LOOK KEEP TRACK OF A COUNTER AND CHECK THAT WE ITERATED FOR THE REQUIRED NUMBER OF STEPS.
+#error TODO FOR EVERY FOR LOOK KEEP TRACK OF A COUNTER AND CHECK THAT WE ITERATED FOR THE REQUIRED NUMBER OF STEPS.
+#error TODO FOR EVERY FOR LOOK KEEP TRACK OF A COUNTER AND CHECK THAT WE ITERATED FOR THE REQUIRED NUMBER OF STEPS.
+#error TODO FOR EVERY FOR LOOK KEEP TRACK OF A COUNTER AND CHECK THAT WE ITERATED FOR THE REQUIRED NUMBER OF STEPS.
+#error TODO FOR EVERY FOR LOOK KEEP TRACK OF A COUNTER AND CHECK THAT WE ITERATED FOR THE REQUIRED NUMBER OF STEPS.
+#error TODO FOR EVERY FOR LOOK KEEP TRACK OF A COUNTER AND CHECK THAT WE ITERATED FOR THE REQUIRED NUMBER OF STEPS.
+#error TODO FOR EVERY FOR LOOK KEEP TRACK OF A COUNTER AND CHECK THAT WE ITERATED FOR THE REQUIRED NUMBER OF STEPS.
+#error TODO FOR EVERY FOR LOOK KEEP TRACK OF A COUNTER AND CHECK THAT WE ITERATED FOR THE REQUIRED NUMBER OF STEPS.
+#error TODO FOR EVERY FOR LOOK KEEP TRACK OF A COUNTER AND CHECK THAT WE ITERATED FOR THE REQUIRED NUMBER OF STEPS.
+#error TODO FOR EVERY FOR LOOK KEEP TRACK OF A COUNTER AND CHECK THAT WE ITERATED FOR THE REQUIRED NUMBER OF STEPS.
 
 	/*
 	 * If init, we cannot verify the bid-ask curve,
