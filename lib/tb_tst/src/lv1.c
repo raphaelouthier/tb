@@ -311,7 +311,6 @@ static void _lv1_run(
 )
 {
 
-
 	const u64 aid_wid = tim_inc * tim_stp;
 	const u64 tck_min = (u64) (prc_min * (f64) hmp_dim_tck);
 
@@ -593,7 +592,7 @@ static void _lv1_run(
 
 }
 
-#define CHECK_STATE 0
+#define CHECK_STATE 1
 
 /*
  * Verification test.

@@ -95,7 +95,9 @@ static inline u64 _vrf_hst_tcks(
 	/* Traverse the update list in reverse between add and current. */
 	tck_cnt = tck_nbr;
 	const u64 tck_min = ctx->tck_min; 
+	u64 upd_cnt = 0;
 	for (u64 idx = uid_add - uid_cur; idx--;) {
+		upd_cnt++;
 		tb_tst_lv1_upd *src = ctx->upds + uid_cur + idx;
 		const f64 prc = src->prc;
 		const u64 tck_val = tck_min + _prc_to_tck(ctx, prc);
@@ -116,6 +118,7 @@ static inline u64 _vrf_hst_tcks(
 		if (tck_cnt == 0) break;
 		
 	}
+	assert(upd_cnt == uid_add - uid_cur);
 	
 	/* Now, clear the debug flag on each tick.
 	 * Every tick we did not encounter should have an equal
@@ -133,7 +136,9 @@ static inline u64 _vrf_hst_tcks(
 
 	/* Traverse the update list in reverse between current and clean. */
 	tck_cnt = tck_nbr;
+	upd_cnt = 0;
 	for (u64 idx = uid_cur - uid_cln; idx--;) {
+		upd_cnt++;
 		tb_tst_lv1_upd *src = ctx->upds + uid_cln + idx;
 		const f64 prc = src->prc;
 		const u64 tck_val = tck_min + _prc_to_tck(ctx, prc);
@@ -152,6 +157,7 @@ static inline u64 _vrf_hst_tcks(
 		if (tck_cnt == 0) break;
 		
 	}
+	assert(upd_cnt == uid_cur - uid_cln);
 
 	/* Now, clear the debug flag on each tick.
 	 * Every tick we did not encounter should have an equal
@@ -561,6 +567,214 @@ static inline void _vrf_hst_bac(
 
 }
 
+
+/************************
+ * Heatmap verification *
+ ************************/
+
+/*
+ * Reconstruct the heatmap of @hst and verify
+ * that it matches @hst's version.
+ */
+static inline void _vrf_hst_hmp(
+	tb_tst_lv1_ctx *ctx,
+	tb_lv1_hst *hst,
+	u64 uid_cln,
+	u64 uid_cur,
+	u64 uid_add,
+	u64 tim_cln,
+	u64 tim_cur,
+	u64 tim_add
+)
+{
+
+	/* Constants. */
+	const u64 dim_tck = hst->hmp_dim_tck;
+	const u64 dim_tim = hst->hmp_dim_tim;
+	const u64 tim_res = hst->tim_res;
+	const u64 hmp_tim_end = hst->tim_hmp;
+	const u64 hmp_tim_stt = hst->tim_hmp - hst->hmp_tim_spn;
+	assert(hmp_tim_end > hmp_tim_stt);
+	assert((hmp_tim_end - hmp_tim_stt) == ((hst->hmp_dim_tim + 1) * tim_res));
+
+	/*
+	 * Traverse each tick of the heatmap.
+	 */
+	u64 tck_cnt = 0;
+	for (u64 row_idx = 0; row_idx < dim_tck; row_idx++) {
+		tck_cnt++;
+
+		/* Determine the effective tick ID. */
+		u64 tck_val = row_idx + hst->hmp_tck_min;
+		
+		/* Find the tick. */
+		tb_lv1_tck *tck = ns_map_sch(&hst->tcks, tck_val, u64, tb_lv1_tck, tcks);
+
+		/* If tick not present, the entire heatmap row must be null. */
+		u64 tim_cnt = 0;
+		for (u64 col_idx = 0; col_idx < dim_tim; col_idx++) {
+			assert(hst->hmp[row_idx * dim_tck + col_idx] == 0,
+				"incorrect heatmap value at row %U/%U col %U/%U.\n"
+				"Expected 0 (no tick data), got %d.",
+				row_idx, dim_tck,
+				col_idx, dim_tim,
+				hst->hmp[row_idx * dim_tck + col_idx]
+			);
+
+		}	
+		assert(tim_cnt == dim_tim);
+
+		/* Cell computation state. */
+		assert(hst->tim_cur < hmp_tim_end);
+		assert(hmp_tim_end - tim_res <= hst->tim_cur);
+		u64 cel_tim_stt = hmp_tim_end - tim_res; 
+		s64 col_nxt = (s64) dim_tim - 1;
+		u64 upd_lst_tim = hst->tim_cur; 
+		u64 cel_ttl_dur = upd_lst_tim - cel_tim_stt;
+		u64 cel_dur = 0;
+		f64 cel_sum = 0;
+
+
+		/* If tick is present, recompute the value of each cell for this tick. */
+		tb_lv1_upd *upd;
+		u64 upd_cnt = 0;
+		u8 fst = 1;
+		ns_dls_fe(upd, &tck->upds_tck, upds_tck) {
+			upd_cnt++;
+
+			/* Check context. */
+			assert(col_nxt >= 0);
+			assert(upd_lst_tim >= cel_tim_stt);
+			assert(!(cel_tim_stt % tim_res));
+			assert((cel_tim_stt - hmp_tim_stt) / tim_res == (u64) col_nxt);
+
+			/* Determine the update's cell. */
+			const u64 upd_tim = upd->tim;
+			assert(upd_tim <= upd_lst_tim);
+			const f64 upd_vol = upd->vol;
+			const s64 upd_cel = ((s64) upd_tim - (s64) hmp_tim_stt) / (s64) tim_res;
+			assert((upd_cel != col_nxt) == (upd_tim < cel_tim_stt));
+
+			/* If first update, must match the current volume. */ 
+			assert((!fst) || (upd_vol == tck->vol_cur));
+			fst = 0;
+
+			/* Incorporate the update in the current cell's state. */
+			const u64 inc_stt = (upd_tim <= cel_tim_stt) ? cel_tim_stt : upd_tim;
+			assert(inc_stt <= upd_lst_tim);
+			const u64 inc_dur = upd_lst_tim - inc_stt;
+			if (inc_dur) {
+				cel_dur += inc_dur; 
+				cel_sum += (f64) upd_vol * (f64) inc_dur;
+			}
+
+			/* Update the time of last update. */
+			upd_lst_tim = upd_tim;
+
+			/* If we changed cell : */
+			assert(upd_cel <= col_nxt);
+			if (upd_cel != col_nxt) {
+
+				/* Compute and compare the cell's expected value. */
+				assert(cel_dur == cel_ttl_dur);
+				const f64 cel_val = (f64) cel_sum / (f64) cel_dur;
+				assert(cel_val == hst->hmp[row_idx * dim_tck + (u64) col_nxt],
+					"incorrect heatmap value at row %U/%U col %U/%U.\n"
+					"Expected %d, got %d.",
+					row_idx, dim_tck,
+					col_nxt, dim_tim,
+					cel_val, hst->hmp[row_idx * dim_tck + (u64) col_nxt]
+				);
+				col_nxt--;
+
+				/* All cells between ] max(upd_cel, 0), col_nxt [ should have @upd_vol as value. */ 
+				s64 prp_min = (upd_cel < 0) ? 0 : upd_cel + 1;
+				assert(prp_min >= 0);
+				for (s64 prp_idx = col_nxt; prp_idx >= prp_min; prp_idx--) {
+					assert(col_nxt >= 0);
+					assert(prp_idx == col_nxt);
+					assert(upd_vol == hst->hmp[row_idx * dim_tck + (u64) col_nxt],
+						"incorrect heatmap value at row %U/%U col %U/%U.\n"
+						"Expected %d, got %d.",
+						row_idx, dim_tck,
+						col_nxt, dim_tim,
+						upd_vol, hst->hmp[row_idx * dim_tck + (u64) col_nxt]
+					);
+					col_nxt--;
+				}
+
+				/* If we're past the heatmap start, stop now. */
+				if (upd_tim < hmp_tim_stt) break;
+
+				/* Reset the cell state. */
+				cel_tim_stt = upd_tim - (upd_tim % tim_res);
+				assert(cel_tim_stt <= upd_tim); 
+				assert(upd_tim < cel_tim_stt + tim_res);
+				cel_ttl_dur = tim_res;
+				cel_dur = cel_tim_stt + tim_res - upd_tim; 
+				assert(cel_dur);
+				assert(cel_dur < cel_ttl_dur);
+				cel_sum = (f64) upd_vol * (f64) cel_dur;
+			}
+			
+		}
+		assert(fst == (upd_cnt == 0));
+		assert((!fst) || (tck->vol_stt == tck->vol_cur));
+
+		/* If we did not verify all cells, use the resting time to check remaining ones. */
+		assert((col_nxt != -1) == (upd_lst_tim > hmp_tim_stt));
+		if (col_nxt != -1) {
+
+			/* Get the resting volume. */
+			const f64 vol_stt = tck->vol_stt;
+
+			/* Incorporate the resting volume in the current cell's state. */
+			const u64 inc_stt = cel_tim_stt;
+			assert(inc_stt < upd_lst_tim);
+			const u64 inc_dur = upd_lst_tim - inc_stt;
+			cel_dur += inc_dur; 
+			cel_sum += (f64) vol_stt * (f64) inc_dur;
+
+			/* Update the time of last update. */
+			upd_lst_tim = hmp_tim_stt;
+
+			/* Compute and compare the cell's expected value. */
+			assert(cel_dur == cel_ttl_dur);
+			const f64 cel_val = (f64) cel_sum / (f64) cel_dur;
+			assert(cel_val == hst->hmp[row_idx * dim_tck + (u64) col_nxt],
+				"incorrect heatmap value at row %U/%U col %U/%U.\n"
+				"Expected %d, got %d.",
+				row_idx, dim_tck,
+				col_nxt, dim_tim,
+				cel_val, hst->hmp[row_idx * dim_tck + (u64) col_nxt]
+			);
+			col_nxt--;
+
+			/* All cells between [0, col_nxt [ should have @vol_stt as value. */ 
+			for (s64 prp_idx = col_nxt + 1; prp_idx--;) {
+				assert(col_nxt >= 0);
+				assert(prp_idx == col_nxt);
+				assert(vol_stt == hst->hmp[row_idx * dim_tck + (u64) col_nxt],
+					"incorrect heatmap value at row %U/%U col %U/%U.\n"
+					"Expected %d, got %d.",
+					row_idx, dim_tck,
+					col_nxt, dim_tim,
+					vol_stt, hst->hmp[row_idx * dim_tck + (u64) col_nxt]
+				);
+				col_nxt--;
+			}
+
+		}
+
+		/* Check that we verified all cells. */
+		assert(col_nxt == -1);
+		assert(upd_lst_tim <= hmp_tim_stt);
+		
+	}
+	assert(tck_cnt == dim_tck);
+
+}
+
 /***************************
  * Verification entrypoint *
  ***************************/
@@ -596,7 +810,7 @@ void tb_tst_lv1_vrf_hst_stt(
 	assert((uid_add == upd_nbr) || (ctx->upds[uid_add].tim >= tim_add));
 	assert((!did_cln) || (uid_cln + 1 >= upd_nbr) || (ctx->upds[uid_cln + 1].tim > tim_cln)); 
 
-	/* Test the history state. */
+	/* Verify the updates list. */
 	_vrf_hst_upds(
 		ctx, hst,
 		uid_cln, uid_add,
@@ -620,6 +834,13 @@ void tb_tst_lv1_vrf_hst_stt(
 
 	/* Verify the bid-ask curve. */
 	_vrf_hst_bac(
+		ctx, hst,
+		uid_cln, uid_cur, uid_add,
+		tim_cln, tim_cur, tim_add
+	);
+
+	/* Verify the heatmap. */
+	_vrf_hst_hmp(
 		ctx, hst,
 		uid_cln, uid_cur, uid_add,
 		tim_cln, tim_cur, tim_add
@@ -673,7 +894,9 @@ void tb_tst_lv1_vrf_hst_res(
 	const u64 aid_bac = (tim_cur + ctx->aid_wid - 1 - ctx->tim_stt) / ctx->aid_wid;
 	const s64 aid_hmp = (s64) aid_bac - (s64) ctx->hmp_dim_tim;  
 	const f64 *hmp = tb_lv1_hmp(hst);
+	u64 itr_nbr = 0;
 	for (u64 cnt = 0; cnt < ctx->hmp_dim_tim - 1; cnt++) {
+		itr_nbr++;
 		const s64 col_idx = aid_hmp + (s64) cnt; 
 
 		/* If column is before start point, it must be equal
@@ -685,9 +908,9 @@ void tb_tst_lv1_vrf_hst_res(
 		const f64 *hmp_cmp = hmp + cnt * ctx->hmp_dim_tck;
 
 		/* Compare each value in the heatmap. */
-		u64 cnt = 0;
+		u64 chk_nbr = 0;
 		for (u64 tck_idx = hmp_min; tck_idx < hmp_min + hmp_nbr; tck_idx++) {
-			cnt++;
+			chk_nbr++;
 
 			/* Read the value from the heatmap. */
 			const f64 hmp_val = hmp_cmp[tck_idx - hmp_min];
@@ -699,17 +922,19 @@ void tb_tst_lv1_vrf_hst_res(
 				0;
 
 			assert(hmp_val == src_val,
-				"heatmap mismatch at column %U/%U row %U/%U (tick %U/%U, context : %I/%U) : expected %d got %d.\n",
-				col_idx, ctx->hmp_dim_tim - 1,
+				"heatmap mismatch at column %U/%U (aid %I), row %U/%U (tick %U/%U, context : %I/%U) : expected %d got %d.\n",
+				cnt, ctx->hmp_dim_tim - 1,
+				col_idx,
 				tck_idx - hmp_min, ctx->hmp_dim_tck,
-				tck_idx, hmp_nbr,
-				(s64) tck_idx - (s64) ctx->tck_min, ctx->tck_max,
+				tck_idx, hmp_nbr + hmp_min,
+				(s64) tck_idx - (s64) ctx->tck_min, ctx->tck_max - ctx->tck_min,
 				src_val, hmp_val
 			);
 		}
-		assert(cnt == hst->hmp_dim_tck);
+		assert(chk_nbr == hst->hmp_dim_tck);
 
 	}
+	assert(itr_nbr == hst->hmp_dim_tim);
 
 	/* Verify the heatmap current column against the
 	 * currently updated column. */
@@ -717,9 +942,9 @@ void tb_tst_lv1_vrf_hst_res(
 	const u64 div = (tim_cur - ctx->tim_stt) % ctx->aid_wid;
 	/* Compare each value in the heatmap. */
 	debug("%U %U.\n", hmp_min, hmp_nbr);
-	u64 cnt = 0;
+	u64 chk_nbr = 0;
 	for (u64 tck_idx = hmp_min; tck_idx < hmp_min + hmp_nbr; tck_idx++) {
-		cnt++;
+		chk_nbr++;
 
 		/* If the tick is in the generation range, read from source.
 		 * Otherwise, the value is 0. */
@@ -740,21 +965,7 @@ void tb_tst_lv1_vrf_hst_res(
 			avg, hmp_cmp[tck_idx - hmp_min]
 		);
 	}
-	assert(cnt == hst->hmp_dim_tck);
-
-#error TODO FOR EVERY FOR LOOK KEEP TRACK OF A COUNTER AND CHECK THAT WE ITERATED FOR THE REQUIRED NUMBER OF STEPS.
-#error TODO FOR EVERY FOR LOOK KEEP TRACK OF A COUNTER AND CHECK THAT WE ITERATED FOR THE REQUIRED NUMBER OF STEPS.
-#error TODO FOR EVERY FOR LOOK KEEP TRACK OF A COUNTER AND CHECK THAT WE ITERATED FOR THE REQUIRED NUMBER OF STEPS.
-#error TODO FOR EVERY FOR LOOK KEEP TRACK OF A COUNTER AND CHECK THAT WE ITERATED FOR THE REQUIRED NUMBER OF STEPS.
-#error TODO FOR EVERY FOR LOOK KEEP TRACK OF A COUNTER AND CHECK THAT WE ITERATED FOR THE REQUIRED NUMBER OF STEPS.
-#error TODO FOR EVERY FOR LOOK KEEP TRACK OF A COUNTER AND CHECK THAT WE ITERATED FOR THE REQUIRED NUMBER OF STEPS.
-#error TODO FOR EVERY FOR LOOK KEEP TRACK OF A COUNTER AND CHECK THAT WE ITERATED FOR THE REQUIRED NUMBER OF STEPS.
-#error TODO FOR EVERY FOR LOOK KEEP TRACK OF A COUNTER AND CHECK THAT WE ITERATED FOR THE REQUIRED NUMBER OF STEPS.
-#error TODO FOR EVERY FOR LOOK KEEP TRACK OF A COUNTER AND CHECK THAT WE ITERATED FOR THE REQUIRED NUMBER OF STEPS.
-#error TODO FOR EVERY FOR LOOK KEEP TRACK OF A COUNTER AND CHECK THAT WE ITERATED FOR THE REQUIRED NUMBER OF STEPS.
-#error TODO FOR EVERY FOR LOOK KEEP TRACK OF A COUNTER AND CHECK THAT WE ITERATED FOR THE REQUIRED NUMBER OF STEPS.
-#error TODO FOR EVERY FOR LOOK KEEP TRACK OF A COUNTER AND CHECK THAT WE ITERATED FOR THE REQUIRED NUMBER OF STEPS.
-#error TODO FOR EVERY FOR LOOK KEEP TRACK OF A COUNTER AND CHECK THAT WE ITERATED FOR THE REQUIRED NUMBER OF STEPS.
+	assert(chk_nbr == hst->hmp_dim_tck);
 
 	/*
 	 * If init, we cannot verify the bid-ask curve,
@@ -767,7 +978,9 @@ void tb_tst_lv1_vrf_hst_res(
 		const u64 aid_max = (ini) ? 0 : ctx->bac_siz - 1;
 		const u64 *bid = tb_lv1_bid(hst);
 		const u64 *ask = tb_lv1_ask(hst);
+		chk_nbr = 0;
 		for (u64 chk_idx = 0; chk_idx < aid_max; chk_idx++) {
+			chk_nbr++;
 			assert(bid[chk_idx] == ctx->bid_arr[aid_bac + chk_idx],
 				"bid curve mismatch at index %U/%U : expected %U got %U.\n",
 				chk_idx, aid_max, ctx->bid_arr[aid_bac + chk_idx], bid[chk_idx]
@@ -777,6 +990,7 @@ void tb_tst_lv1_vrf_hst_res(
 				chk_idx, aid_max, ctx->ask_arr[aid_bac + chk_idx], ask[chk_idx]
 			);
 		}
+		assert(chk_nbr == hst->hmp_dim_tck);
 
 		/* Verify the current best bid and ask. */
 		assert(bid[aid_max] == bst_bid,
