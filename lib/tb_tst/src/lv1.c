@@ -260,7 +260,7 @@ static inline void _upds_mov(
 		}
 		assert(tim >= chc_tims[tck]);
 		if (tim != chc_tims[tck]) {
-			chc_sums[tck] += (f64) (tim - chc_tims[tck]) * vol;
+			chc_sums[tck] += (f64) (tim - chc_tims[tck]) * chc_vols[tck];
 		}
 		chc_vols[tck] = vol;
 		chc_tims[tck] = tim;
@@ -593,8 +593,8 @@ static void _lv1_run(
 
 }
 
-//#define CHECK_STATE 1
-#define CHECK_STATE 0
+#define CHECK_STATE 1
+//#define CHECK_STATE 0
 
 /*
  * Verification test.
@@ -625,6 +625,41 @@ static inline void _vrf_tst(
 		10000, // prices start at 10000. 
 		10, // heatmap has 10 ticks.
 		10, // heatmap has 10 units.
+		10, // bac has 10 units.
+		10, // 10 increments per time unit. 
+		1.
+	);
+}
+
+/*
+ * Big verification test.
+ */
+static inline void _vrf_tst_big(
+	nh_tst_sys *sys,
+	u64 sed,
+	u64 prd,
+	u64 phs,
+	u8 bid,
+	u8 ask
+)
+{
+	assert(bid || ask);
+	tb_tst_lv1_gen_spl *spl = tb_tst_lv1_gen_spl_ctr(
+		bid, ask,
+		1000000, 1000001, 1000002, 1000003,
+		prd, phs
+	);
+
+	_lv1_run(
+		sys, sed, &spl->gen, CHECK_STATE,
+		NS_TIM_S(1000), // Start at 10s.
+		NS_TIM_1MS, // Order every ms.
+		100, // 100 tick per price unit.
+		150, // 150 time units.
+		7, // 7 tick.
+		10000, // prices start at 10000. 
+		100, // heatmap has 100 ticks.
+		100, // heatmap has 100 units.
 		10, // bac has 10 units.
 		10, // 10 increments per time unit. 
 		1.
@@ -675,8 +710,6 @@ void tb_tst_lv1(
 	u8 run_prc
 )
 {
-	_vrf_tst(sys, sed, 10, 0, 1, 0);
-	assert(0);
 	_vrf_tst(sys, sed, 10, 0, 0, 1);
 	_vrf_tst(sys, sed, 10, 0, 1, 1);
 	_vrf_tst(sys, sed, 10, 5, 1, 0);
@@ -689,6 +722,17 @@ void tb_tst_lv1(
 	_vrf_tst(sys, sed, 30, 0, 0, 1);
 	_vrf_tst(sys, sed, 30, 0, 1, 1);
 	_vrf_tst(sys, sed, 50, 0, 1, 1);
-	assert(0);
+	_vrf_tst_big(sys, sed, 10, 0, 0, 1);
+	_vrf_tst_big(sys, sed, 10, 0, 1, 1);
+	_vrf_tst_big(sys, sed, 10, 5, 1, 0);
+	_vrf_tst_big(sys, sed, 10, 5, 0, 1);
+	_vrf_tst_big(sys, sed, 10, 5, 1, 1);
+	_vrf_tst_big(sys, sed, 1, 0, 1, 0);
+	_vrf_tst_big(sys, sed, 1, 0, 0, 1);
+	_vrf_tst_big(sys, sed, 1, 0, 1, 1);
+	_vrf_tst_big(sys, sed, 30, 0, 1, 0);
+	_vrf_tst_big(sys, sed, 30, 0, 0, 1);
+	_vrf_tst_big(sys, sed, 30, 0, 1, 1);
+	_vrf_tst_big(sys, sed, 50, 0, 1, 1);
 	_rdm_tst(sys, sed);
 }

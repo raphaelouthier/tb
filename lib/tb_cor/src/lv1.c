@@ -615,11 +615,10 @@ static inline void _hmp_wrt_row(
 
 	/* If no data, just write the current volume. */
 	if (!upd) {
-		debug("rst %d.\n", vol_cur);
 		u64 wrt_cnt = 0;
 		for (u64 col_id = hst->hmp_dim_tim; (col_id--) && wrt_nb--;) {
 			wrt_cnt++;
-			debug("wrt %U %U %d.\n", row_id, col_id, vol_cur); 
+			debug("  rs %U %U %d.\n", row_id, col_id, vol_cur); 
 			HMP_LOC(col_id, row_id) = vol_cur;	
 		}
 		debug("wrt_cnt %U.\n", wrt_cnt);
@@ -631,31 +630,39 @@ static inline void _hmp_wrt_row(
 	check(!(hst->tim_hmp % tim_res)); 
 	check(!(hst->hmp_tim_spn % tim_res)); 
 	const u64 aid_hmp = (hst->tim_hmp - hst->hmp_tim_spn) / tim_res;  
-	u64 aid_upd = upd->tim / tim_res;
 	u64 wrt_cnt = 0;
 	for (u64 col_id = hst->hmp_dim_tim; (col_id--) && wrt_nb--;) {
 		check((upd) || (vol_stt == vol_cur));
+		debug("col %U, [%U, %U[, cur %U.\n", col_id, tim_res * (aid_hmp + col_id), tim_res * (aid_hmp + col_id + 1), tim_cur);
 
 		/* If no update anymore, just write the start volume. */
 		if (!upd) {
+			debug("  end %U %U %d.\n", row_id, col_id, vol_stt); 
 			HMP_LOC(col_id, row_id) = vol_stt;	
+			wrt_cnt++;
 			continue;
 		}
+
+		debug("  UPD0 %U %d.\n", upd->tim, upd->vol);
 
 		/* The previous update should be in or before
 		 * this cell.
 		 * The next update should be after this cell. */
 		const u64 aid_col = aid_hmp + col_id;
+		const u64 aid_upd = upd->tim / tim_res;
 		check(aid_upd <= aid_col);
 		#ifdef DEBUG
 		tb_lv1_upd *nxt = _upd_nxt(upd);
-		check((!nxt) || ((upd->tim / tim_res) > aid_col));
+		if (nxt) debug("  NXT0 %U %d, %U %U.\n", nxt->tim, nxt->vol, nxt->tim / tim_res, aid_col);
+		check((!nxt) || ((nxt->tim / tim_res) > aid_col));
 		#endif
 
 		/* If the previous update is before this cell,
 		 * just write the current volume. */
 		if (aid_upd < aid_col) {
+			debug("  bef %U %U %d.\n", row_id, col_id, vol_stt); 
 			HMP_LOC(col_id, row_id) = vol_cur;	
+			wrt_cnt++;
 			continue;
 		}
 
@@ -670,6 +677,9 @@ static inline void _hmp_wrt_row(
 		u64 tim_ttl = 0;
 		while (1) {
 			check((upd) || (vol_stt == vol_cur));
+
+			if (upd) debug("  UPDI %U %d.\n", upd->tim, upd->vol);
+			else debug("  UPDI null.\n");
 
 			/* Compute the current calculation attrs.
 			 * If no more updates, use the current volume
@@ -694,8 +704,8 @@ static inline void _hmp_wrt_row(
 			/* Report new next update time. */
 			upd_nxt = upd_tim;
 
-			/* If no more update, stop. */
-			if (!upd) break;
+			/* If no more update, or if update before this cell, stop. */
+			if ((!upd) || (upd->tim < cel_stt)) break;
 
 			/* Fetch the previous update. */
 			upd = _upd_prv(upd);
@@ -710,6 +720,7 @@ static inline void _hmp_wrt_row(
 
 		/* Compute the average. */
 		const f64 vol_avg = wgt_sum / (f64) tim_ttl;
+		debug("  avg %U %U %d (%d / %U).\n", row_id, col_id, vol_avg, wgt_sum, tim_ttl); 
 		HMP_LOC(col_id, row_id) = vol_avg;	
 
 		wrt_cnt++;

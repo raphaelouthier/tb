@@ -4,6 +4,21 @@
 
 #include <tb_tst/lv1_utl.h>
 
+/***************
+ * Volume comp *
+ ***************/
+
+static inline u8 _f64_eq(
+	f64 a,
+	f64 b
+)
+{
+	f64 dif = a - b;
+	if (dif < 0) dif = -dif;
+	return dif < 0.001;
+}
+	
+
 /*****************
  * Updates check *
  *****************/
@@ -663,7 +678,9 @@ static inline void _vrf_hst_hmp(
 			const u64 upd_tim = upd->tim;
 			assert(upd_tim <= upd_lst_tim);
 			const f64 upd_vol = upd->vol;
-			const s64 upd_cel = ((s64) upd_tim - (s64) hmp_tim_stt) / (s64) tim_res;
+			const s64 upd_cel = (upd_tim < hmp_tim_stt) ? 
+				-1 : 
+				(s64) ((upd_tim - hmp_tim_stt) / tim_res);
 			assert((upd_cel != col_nxt) == (upd_tim < cel_tim_stt));
 
 			/* If first update, must match the current volume. */ 
@@ -691,7 +708,7 @@ static inline void _vrf_hst_hmp(
 				assert(cel_dur == cel_ttl_dur);
 				assert(cel_dur <= tim_res);
 				const f64 cel_val = (f64) cel_sum / (f64) cel_dur;
-				assert(cel_val == hst->hmp[((u64) col_nxt) * dim_tck + row_idx],
+				assert(_f64_eq(cel_val, hst->hmp[((u64) col_nxt) * dim_tck + row_idx]),
 					"incorrect heatmap value at row %U/%U col %U/%U.\n"
 					"Expected %d, got %d.",
 					row_idx, dim_tck,
@@ -706,7 +723,7 @@ static inline void _vrf_hst_hmp(
 				for (s64 prp_idx = col_nxt; prp_idx >= prp_min; prp_idx--) {
 					assert(col_nxt >= 0);
 					assert(prp_idx == col_nxt);
-					assert(upd_vol == hst->hmp[((u64) col_nxt) * dim_tck + row_idx],
+					assert(_f64_eq(upd_vol, hst->hmp[((u64) col_nxt) * dim_tck + row_idx]),
 						"incorrect heatmap value at row %U/%U col %U/%U.\n"
 						"Expected %d, got %d.",
 						row_idx, dim_tck,
@@ -736,14 +753,15 @@ static inline void _vrf_hst_hmp(
 		assert((!fst) || (tck->vol_stt == tck->vol_cur));
 
 		/* If we did not verify all cells, use the resting time to check remaining ones. */
-		assert((col_nxt != -1) == (upd_lst_tim > hmp_tim_stt));
+		assert((col_nxt != -1) == (upd_lst_tim >= hmp_tim_stt));
 		if (col_nxt != -1) {
+			assert(col_nxt >= 0);
 
 			/* Get the resting volume. */
 			const f64 vol_stt = tck->vol_stt;
 
 			/* Incorporate the resting volume in the current cell's state. */
-			cel_tim_stt = hmp_tim_stt + tim_res * col_nxt;
+			cel_tim_stt = hmp_tim_stt + tim_res * (u64) col_nxt;
 			const u64 inc_stt = cel_tim_stt;
 			assert(inc_stt <= upd_lst_tim);
 			const u64 inc_dur = upd_lst_tim - inc_stt;
@@ -760,7 +778,7 @@ static inline void _vrf_hst_hmp(
 			/* Compute and compare the cell's expected value. */
 			assert(cel_dur == cel_ttl_dur);
 			const f64 cel_val = (f64) cel_sum / (f64) cel_dur;
-			assert(cel_val == hst->hmp[((u64) col_nxt) * dim_tck + row_idx],
+			assert(_f64_eq(cel_val, hst->hmp[((u64) col_nxt) * dim_tck + row_idx]),
 				"incorrect heatmap value at row %U/%U col %U/%U.\n"
 				"Expected %d, got %d.",
 				row_idx, dim_tck,
@@ -773,7 +791,7 @@ static inline void _vrf_hst_hmp(
 			for (s64 prp_idx = col_nxt + 1; prp_idx--;) {
 				assert(col_nxt >= 0);
 				assert(prp_idx == col_nxt);
-				assert(vol_stt == hst->hmp[((u64) col_nxt) * dim_tck + row_idx],
+				assert(_f64_eq(vol_stt, hst->hmp[((u64) col_nxt) * dim_tck + row_idx]),
 					"incorrect heatmap value at row %U/%U col %U/%U.\n"
 					"Expected %d, got %d.",
 					row_idx, dim_tck,
@@ -914,7 +932,7 @@ void tb_tst_lv1_vrf_hst_res(
 	const s64 aid_hmp = (s64) aid_bac - (s64) ctx->hmp_dim_tim;  
 	const f64 *hmp = tb_lv1_hmp(hst);
 	u64 itr_nbr = 0;
-	for (u64 cnt = 0; cnt < ctx->hmp_dim_tim; cnt++) {
+	for (u64 cnt = 0; cnt < ctx->hmp_dim_tim - 1; cnt++) {
 		itr_nbr++;
 		const s64 col_idx = aid_hmp + (s64) cnt; 
 
@@ -940,7 +958,7 @@ void tb_tst_lv1_vrf_hst_res(
 				src_cmp[tck_idx - ctx->tck_min] :
 				0;
 
-			assert(hmp_val == src_val,
+			assert(_f64_eq(hmp_val, src_val),
 				"heatmap mismatch at column %U/%U (aid %I), row %U/%U (tick %U/%U, context : %I/%U) : expected %d got %d.\n",
 				cnt, ctx->hmp_dim_tim - 1,
 				col_idx,
@@ -953,15 +971,21 @@ void tb_tst_lv1_vrf_hst_res(
 		assert(chk_nbr == hst->hmp_dim_tck);
 
 	}
-	assert(itr_nbr == hst->hmp_dim_tim);
+	assert(itr_nbr + 1 == hst->hmp_dim_tim);
 
 	/* Verify the heatmap current column against the
 	 * currently updated column. */
 	const f64 *hmp_cmp = hmp + (ctx->hmp_dim_tim - 1) * ctx->hmp_dim_tck;
-	const u64 div = (tim_cur - ctx->tim_stt) % ctx->aid_wid;
+	const u64 div = (tim_cur > ctx->tim_stt) ?
+		((tim_cur - ctx->tim_stt - 1) % ctx->aid_wid) + 1 :
+		0;
+
 	/* Compare each value in the heatmap. */
 	debug("%U %U.\n", hmp_min, hmp_nbr);
 	u64 chk_nbr = 0;
+	const u64 cel_stt = hst->tim_hmp - hst->tim_res; 
+	assert(cel_stt < tim_cur);
+	assert(tim_cur <= hst->tim_hmp);
 	for (u64 tck_idx = hmp_min; tck_idx < hmp_min + hmp_nbr; tck_idx++) {
 		chk_nbr++;
 
@@ -971,12 +995,21 @@ void tb_tst_lv1_vrf_hst_res(
 		if ((ctx->tck_min <= tck_idx) && (tck_idx < ctx->tck_max)) {
 			const u64 off = tck_idx - ctx->tck_min;
 			assert(tim_cur >= chc_tims[off]);
+			if (chc_tims[off] <= cel_stt) {
+				chc_tims[off] = cel_stt;
+				chc_sums[off] = 0;
+			}
+			const u64 tim = chc_tims[off];
+			assert(tim_cur - tim <= hst->tim_res);
+			assert((!div) || (tim_cur - tim != hst->tim_res) || (chc_sums[off] == 0));
+
+			assert(div <= ctx->aid_wid);
 			avg = (div) ? 
-				(chc_sums[off] + (f64) (tim_cur - chc_tims[off]) * chc_vols[off]) / (f64) div :
+				(chc_sums[off] + (f64) (tim_cur - tim) * chc_vols[off]) / (f64) div :
 				chc_vols[off];
 		}
 
-		assert(hmp_cmp[tck_idx - hmp_min] == avg,
+		assert(_f64_eq(hmp_cmp[tck_idx - hmp_min], avg),
 			"heatmap mismatch at current column row %U/%U (tick %U/%U, context : %I/%U) : expected %d got %d.\n",
 			tck_idx - hmp_min, ctx->hmp_dim_tck,
 			tck_idx, hmp_nbr,
