@@ -73,7 +73,7 @@ static inline f64 _tck_to_prc(
  *******************/
 
 /*
- * Get the hashmap end time corresponding to
+ * Get the heatmap end time corresponding to
  * @tim_cur.
  */
 static inline u64 _to_hmp_end_tim(
@@ -496,6 +496,7 @@ static inline void _hst_hmp_mov(
 		(shf_tim >= dim_tim) ||
 		(shf_abs >= dim_tck)
 	) {
+		tb_lv1_log("rnc hmp rst.\n");
 		/* In debug mode, fill with NANs.
 		 * Otherwise, just keep as is. */
 		#ifdef DEBUG
@@ -525,7 +526,7 @@ static inline void _hst_hmp_mov(
 }
 
 /*
- * Write the @wrt_nb first cells of the hashmap row
+ * Write the @wrt_nb first cells of the heatmap row
  * at index @row_id of @hst.
  * If @tck is non-null, it contains the volume updates
  * that should be used to compute cell values.
@@ -559,9 +560,12 @@ static inline void _hmp_wrt_row(
 		(__prv == &tck->upds_tck) ? 0 : ns_cnt_of(__prv, tb_lv1_upd, upds_tck); \
 	})
 
-	/* Cache hashmap. */
+	/* Cache heatmap. */
 	f64 *hmp = hst->hmp;
 	const u64 dim_tck = hst->hmp_dim_tck;
+
+	/* Cache current time. */
+	const u64 tim_cur = hst->tim_cur;
 
 	/* Verify the current tick. */
 
@@ -590,7 +594,7 @@ static inline void _hmp_wrt_row(
 		return;
 	}
 
-	/* Write all cell. */
+	/* Write all cells. */
 	const u64 tim_res = hst->tim_res;
 	check(!(hst->tim_hmp % tim_res)); 
 	check(!(hst->hmp_tim_spn % tim_res)); 
@@ -624,8 +628,11 @@ static inline void _hmp_wrt_row(
 
 		/* Iterate over all updates in this cell and
 		 * determine a compound volume. */
-		u64 cel_tim = tim_res * aid_col;
-		u64 upd_end = tim_res * (aid_col + 1); 
+		const u64 cel_stt = tim_res * aid_col;
+		const u64 cel_end = tim_res * (aid_col + 1); 
+		u64 upd_nxt = (tim_cur < cel_end) ? tim_cur : cel_end;
+		check(upd_nxt > cel_stt);
+		const u64 cel_tim_ttl = upd_nxt - cel_stt;
 		f64 wgt_sum = 0;
 		u64 tim_ttl = 0;
 		while (1) {
@@ -636,19 +643,23 @@ static inline void _hmp_wrt_row(
 			 * for the rest of the time.
 			 * If an update exists, use its volume until
 			 * its start or the start of the cell. */
-			u64 upd_stt = 0;
+			u64 upd_tim = 0;
 			f64 upd_vol = vol_cur;
 			if (upd) {
-				upd_stt = upd->tim; 
+				upd_tim = upd->tim; 
 				upd_vol = upd->vol;
 			}
-			check(upd_stt <= upd_end);
-			if (upd_stt < cel_tim) upd_stt = cel_tim; 
+			check(upd_nxt <= cel_end);
+			check(upd_tim <= upd_nxt);
+			if (upd_tim < cel_stt) upd_tim = cel_stt; 
 
 			/* Incorporate into the average. */
-			u64 upd_tim = upd_end - upd_stt;
-			wgt_sum += (upd_vol * (f64) upd_tim);
-			SAFE_ADD(tim_ttl, upd_tim); 
+			u64 upd_dur = upd_nxt - upd_tim;
+			wgt_sum += (upd_vol * (f64) upd_dur);
+			SAFE_ADD(tim_ttl, upd_dur); 
+
+			/* Report new next update time. */
+			upd_nxt = upd_tim;
 
 			/* If no more update, stop. */
 			if (!upd) break;
@@ -660,7 +671,9 @@ static inline void _hmp_wrt_row(
 			vol_cur = (upd) ? upd->vol : vol_stt;
 
 		}
-		check(tim_ttl == tim_res);
+
+		/* Verify that the total time matches the cell's total active time. */
+		check(tim_ttl == cel_tim_ttl);
 
 		/* Compute the average. */
 		const f64 vol_avg = wgt_sum / (f64) tim_ttl;
@@ -866,7 +879,7 @@ tb_lv1_hst *tb_lv1_ctr(
 	hst->hmp_dim_tim = hmp_dim_tim;
 	hst->hmp_dim_tck = hmp_dim_tck;
 	hst->bac_nb = bac_nb;
-	hst->hmp_tim_spn = (hmp_dim_tim + 1) * tim_res;
+	hst->hmp_tim_spn = (hmp_dim_tim) * tim_res;
 	hst->bac_tim_spn = bac_nb * tim_res;
 	hst->tck_rat = (f64) tck_rat;
 	hst->prc_rat = (f64) 1 / (f64) tck_rat;
@@ -973,7 +986,7 @@ void tb_lv1_prp(
 	/* Update the current time. */
 	hst->tim_cur = tim_cur;
 
-	/* Determine the new hashmap end time. */ 
+	/* Determine the new heatmap end time. */ 
 	const u64 tim_res = hst->tim_res;
 	const u64 tim_hmp_new = _to_hmp_end_tim(hst, tim_cur);
 	const u64 tim_hmp_prv = hst->tim_hmp;
@@ -1004,7 +1017,7 @@ void tb_lv1_prp(
 		/* Count re-anchoring. */
 		SAFE_ADD(hst->hmp_shf_tim, hmp_shf_tim);
 		
-		/* Update the hashmap end time. */
+		/* Update the heatmap end time. */
 		hst->tim_hmp = tim_hmp_new;
 
 	}
@@ -1211,7 +1224,7 @@ void tb_lv1_prc(
 	const u64 wrt_min = hmp_shf_tim + 1;
 
 	/* Re-anchor if needed. */
-	if (hst->hmp_shf_tim) {
+	if (hmp_shf_tim) {
 
 		/* New tick ref should have been computed. */
 		assert(tck_ref_new != (u64) -1);
@@ -1221,24 +1234,23 @@ void tb_lv1_prc(
 		check(tck_ref_cur >= (hst->hmp_dim_tck >> 1));
 		check(tck_ref_new >= (hst->hmp_dim_tck >> 1));
 
-		//assert(0, "tck_ref old %U new %U.\n", tck_ref_cur, tck_ref_new);
-		tb_lv1_log("rnc : %U -> %U.\n", tck_ref_cur, tck_ref_new);
-
-		/* Move heatmap data. */
-		const s64 hmp_shf_tck = (s64) tck_ref_new - (s64) tck_ref_cur;
-		_hst_hmp_mov(hst, hst->hmp_shf_tim, hmp_shf_tck);
-
 		/* Update references and current heatmap range. */
 		hst->tck_ref = tck_ref_new; 
 		hst->hmp_shf_tim = 0;
 		hst->hmp_tck_min = hmp_tck_cur_min = tck_ref_new - hmp_tck_hln;
 		hst->hmp_tck_max = hmp_tck_cur_max = tck_ref_new + hmp_tck_hln;
 
+		tb_lv1_log("rnc : %U -> %U,%U,%U.\n", tck_ref_cur, tck_ref_new, hst->hmp_tck_min, hst->hmp_tck_max);
+
+		/* Move heatmap data. */
+		const s64 hmp_shf_tck = (s64) tck_ref_new - (s64) tck_ref_cur;
+		_hst_hmp_mov(hst, hmp_shf_tim, hmp_shf_tck);
+
 	}
 	check(hst->hmp_tck_max == hst->hmp_tck_min + hst->hmp_dim_tck);
 
 	/* Iterate over all ticks (decreasing order). */
-	tb_lv1_tck *tck = ns_map_sch_gs(&hst->tcks, hmp_tck_cur_min, u64, tb_lv1_tck, tcks); 
+	tb_lv1_tck *tck = ns_map_sch_gs(&hst->tcks, hmp_tck_cur_max, u64, tb_lv1_tck, tcks); 
 	check(hmp_tck_cur_max - hmp_tck_cur_min == hst->hmp_dim_tck);
 	const u64 hmp_dim_tim = hst->hmp_dim_tim;
 	for (u64 row_id = hst->hmp_dim_tck; row_id--;) {
