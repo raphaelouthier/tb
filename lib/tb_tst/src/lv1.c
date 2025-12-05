@@ -307,12 +307,13 @@ static void _lv1_run(
 	u64 hmp_dim_tck,
 	u64 hmp_dim_tim,
 	u64 bac_siz,
-	u64 tim_stp
+	u64 tim_stp,
+	f64 ref_vol
 )
 {
 
 	const u64 aid_wid = tim_inc * tim_stp;
-	const u64 tck_min = (u64) (prc_min * (f64) hmp_dim_tck);
+	const u64 tck_min = (u64) (prc_min * (f64) tck_per_unt);
 
 	/* Generation settings. */ 
 	nh_all__(tb_tst_lv1_ctx, ctx);
@@ -329,7 +330,7 @@ static void _lv1_run(
 	ctx->hmp_dim_tck = hmp_dim_tck;
 	ctx->hmp_dim_tim = hmp_dim_tim;
 	ctx->bac_siz = bac_siz;
-	ctx->ref_vol = 10000;
+	ctx->ref_vol = ref_vol;
 
 	/* Generate tick data. */
 	debug("Generating updates.\n");
@@ -592,7 +593,8 @@ static void _lv1_run(
 
 }
 
-#define CHECK_STATE 1
+//#define CHECK_STATE 1
+#define CHECK_STATE 0
 
 /*
  * Verification test.
@@ -621,10 +623,11 @@ static inline void _vrf_tst(
 		150, // 150 time units.
 		7, // 7 tick.
 		10000, // prices start at 10000. 
-		100, // heatmap has 100 ticks.
-		100, // heatmap has 100 units.
+		10, // heatmap has 10 ticks.
+		10, // heatmap has 10 units.
 		10, // bac has 10 units.
-		10 // 10 increments per time unit. 
+		10, // 10 increments per time unit. 
+		1.
 	);
 }
 
@@ -657,7 +660,8 @@ static inline void _rdm_tst(
 		100, // heatmap has 100 ticks.
 		100, // heatmap has 100 units.
 		200, // bac has 200 units.
-		10 // 10 increments per time unit. 
+		10, // 10 increments per time unit. 
+		10000
 	);
 }
 

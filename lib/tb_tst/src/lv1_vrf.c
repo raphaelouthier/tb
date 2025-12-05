@@ -153,7 +153,7 @@ static inline u64 _vrf_hst_tcks(
 
 		/* Count a tick processed, if all have been, stop. */
 		SAFE_DECR(tck_cnt);
-		if (tck_cnt == 0) break;
+		//if (tck_cnt == 0) break;
 		
 	}
 	assert(upd_cnt == uid_cur - uid_cln);
@@ -621,9 +621,10 @@ static inline void _vrf_hst_hmp(
 			for (u64 col_idx = 0; col_idx < dim_tim; col_idx++) {
 				tim_cnt++;
 				assert(hst->hmp[col_idx * dim_tck + row_idx] == 0,
-					"incorrect heatmap value at row %U/%U col %U/%U.\n"
+					"incorrect heatmap value at row %U/%U (tck %U) col %U/%U.\n"
 					"Expected 0 (no tick data), got %d.",
 					row_idx, dim_tck,
+					tck_val, 
 					col_idx, dim_tim,
 					hst->hmp[col_idx * dim_tck + row_idx]
 				);
@@ -649,7 +650,7 @@ static inline void _vrf_hst_hmp(
 		tb_lv1_upd *upd;
 		u64 upd_cnt = 0;
 		u8 fst = 1;
-		ns_dls_fe(upd, &tck->upds_tck, upds_tck) {
+		ns_dls_fer(upd, &tck->upds_tck, upds_tck) {
 			upd_cnt++;
 
 			/* Check context. */
@@ -676,6 +677,7 @@ static inline void _vrf_hst_hmp(
 			if (inc_dur) {
 				cel_dur += inc_dur; 
 				cel_sum += (f64) upd_vol * (f64) inc_dur;
+				assert(cel_dur <= tim_res);
 			}
 
 			/* Update the time of last update. */
@@ -687,6 +689,7 @@ static inline void _vrf_hst_hmp(
 
 				/* Compute and compare the cell's expected value. */
 				assert(cel_dur == cel_ttl_dur);
+				assert(cel_dur <= tim_res);
 				const f64 cel_val = (f64) cel_sum / (f64) cel_dur;
 				assert(cel_val == hst->hmp[((u64) col_nxt) * dim_tck + row_idx],
 					"incorrect heatmap value at row %U/%U col %U/%U.\n"
@@ -723,7 +726,8 @@ static inline void _vrf_hst_hmp(
 				cel_ttl_dur = tim_res;
 				cel_dur = cel_tim_stt + tim_res - upd_tim; 
 				assert(cel_dur);
-				assert(cel_dur < cel_ttl_dur);
+				assert(cel_dur <= cel_ttl_dur);
+				assert((cel_dur == cel_ttl_dur) == (!(upd_tim % tim_res)));
 				cel_sum = (f64) upd_vol * (f64) cel_dur;
 			}
 			
@@ -739,11 +743,16 @@ static inline void _vrf_hst_hmp(
 			const f64 vol_stt = tck->vol_stt;
 
 			/* Incorporate the resting volume in the current cell's state. */
+			cel_tim_stt = hmp_tim_stt + tim_res * col_nxt;
 			const u64 inc_stt = cel_tim_stt;
-			assert(inc_stt < upd_lst_tim);
+			assert(inc_stt <= upd_lst_tim);
 			const u64 inc_dur = upd_lst_tim - inc_stt;
-			cel_dur += inc_dur; 
-			cel_sum += (f64) vol_stt * (f64) inc_dur;
+			assert(inc_dur <= tim_res);
+			if (inc_dur) {
+				cel_dur += inc_dur; 
+				cel_sum += (f64) vol_stt * (f64) inc_dur;
+			}
+			assert(cel_dur <= tim_res);
 
 			/* Update the time of last update. */
 			upd_lst_tim = hmp_tim_stt;

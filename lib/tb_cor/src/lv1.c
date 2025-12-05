@@ -474,6 +474,23 @@ static inline void _hst_bac_mov(
  ***********/
 
 /*
+ * Print the heatmap.
+ */
+static inline void _hmp_log(
+	tb_lv1_hst *hst
+)
+{
+	for (u64 tck_idx = hst->hmp_dim_tck; tck_idx--;) {
+		debug("%U (%U) : ", tck_idx, hst->hmp_tck_min + tck_idx);
+		for (u64 tim_idx = 0; tim_idx < hst->hmp_dim_tim; tim_idx++) {
+			debug("%.3d ", hst->hmp[tim_idx * hst->hmp_dim_tck + tck_idx]);
+		}
+		debug("\n");
+	}
+	debug("\n");
+}
+
+/*
  * Move the heatmap.
  * Caused by a re-anchor during generation.
  * @shf_tck > 0 -> move data down.
@@ -505,10 +522,16 @@ static inline void _hst_hmp_mov(
 		return;
 	}
 
+	debug("pre :\n");
+	_hmp_log(hst);
+
+	debug("shf %U %I.\n", shf_tim, shf_tck);
 	#if 0
 	/* Bruteforce. Should only be used for debug. */
-	const u64 cpy_off = shf_tim * dim_tck + shf_tck;
-	ns_mem_cpy(hst->hmp + cpy_off, hst->hmp, dim_tim * dim_tck * sizeof(f64) - cpy_off);
+	check((s64) shf_tim * (s64) dim_tck >= (s64) -shf_tck);
+	const u64 cpy_off = shf_tim * dim_tck + (u64) shf_tck;
+	debug("off %U %U.\n", cpy_off, dim_tim * dim_tck - cpy_off);
+	ns_mem_cpy(hst->hmp, hst->hmp + cpy_off, (dim_tim * dim_tck - cpy_off) * sizeof(f64));
 
 	#else
 	/* More fine-grained copy : iterate over
@@ -522,6 +545,9 @@ static inline void _hst_hmp_mov(
 		src += dim_tck;
 	}
 	#endif
+
+	debug("post :\n");
+	_hmp_log(hst);
 
 }
 
@@ -541,6 +567,7 @@ static inline void _hmp_wrt_row(
 )
 {
 
+	debug("wrt_dat %U %U.\n", row_id, wrt_nb);
 	/*
 	 * Utils.
 	 */
@@ -588,9 +615,14 @@ static inline void _hmp_wrt_row(
 
 	/* If no data, just write the current volume. */
 	if (!upd) {
+		debug("rst %d.\n", vol_cur);
+		u64 wrt_cnt = 0;
 		for (u64 col_id = hst->hmp_dim_tim; (col_id--) && wrt_nb--;) {
+			wrt_cnt++;
+			debug("wrt %U %U %d.\n", row_id, col_id, vol_cur); 
 			HMP_LOC(col_id, row_id) = vol_cur;	
 		}
+		debug("wrt_cnt %U.\n", wrt_cnt);
 		return;
 	}
 
@@ -600,6 +632,7 @@ static inline void _hmp_wrt_row(
 	check(!(hst->hmp_tim_spn % tim_res)); 
 	const u64 aid_hmp = (hst->tim_hmp - hst->hmp_tim_spn) / tim_res;  
 	u64 aid_upd = upd->tim / tim_res;
+	u64 wrt_cnt = 0;
 	for (u64 col_id = hst->hmp_dim_tim; (col_id--) && wrt_nb--;) {
 		check((upd) || (vol_stt == vol_cur));
 
@@ -679,7 +712,11 @@ static inline void _hmp_wrt_row(
 		const f64 vol_avg = wgt_sum / (f64) tim_ttl;
 		HMP_LOC(col_id, row_id) = vol_avg;	
 
+		wrt_cnt++;
+
 	}
+
+	debug("wrt_cnt %U.\n", wrt_cnt);
 
 }
 
@@ -1276,6 +1313,9 @@ void tb_lv1_prc(
 		}
 
 	}
+
+	debug("Res : \n");
+	_hmp_log(hst);
 
 }
 
