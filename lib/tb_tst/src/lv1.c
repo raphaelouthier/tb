@@ -21,7 +21,6 @@ static inline void _bac_add(
 	u64 *bst_askp
 )
 {
-	assert(tck < ctx->tck_nbr);
 	const u64 aid_bac = (tim - ctx->tim_stt) / ctx->aid_wid;
 	u64 bst_bac_aid = *bst_bac_aidp;
 	//debug("bac add tim %U aid_bac %U bst_bac_aid %U.\n", tim, aid_bac, bst_bac_aid);
@@ -33,11 +32,10 @@ static inline void _bac_add(
 		*bst_askp = ctx->ask_ini[bst_bac_aid];
 		debug("ini bid %U ask %U.\n", *bst_bidp, *bst_askp);
 	}
-	const u64 tck_abs = tck + ctx->tck_min;
-	if ((vol < 0) && (tck_abs > *bst_bidp)) {
-		*bst_bidp = tck_abs;
-	} else if ((vol > 0) && (tck_abs < *bst_askp)) {
-		*bst_askp = tck_abs;
+	if ((vol < 0) && (tck > *bst_bidp)) {
+		*bst_bidp = tck;
+	} else if ((vol > 0) && (tck < *bst_askp)) {
+		*bst_askp = tck;
 	}
 	//debug("new bid %U ask %U.\n", *bst_bidp, *bst_askp);
 	check(*bst_askp >= ctx->tck_min);
@@ -79,7 +77,7 @@ static inline void _upds_add_ini(
 	tb_tst_lv1_ctx *ctx,
 	tb_lv1_hst *hst,
 	u64 *tims,
-	f64 *prcs,
+	u64 *tcks,
 	f64 *vols,
 	u64 tim_add,
 	u64 *uid_addp,
@@ -101,9 +99,8 @@ static inline void _upds_add_ini(
 
 		/* Add. */
 		tims[i] = tim;
-		const f64 prc = prcs[i] = upds[uid_add].prc;
+		const u64 tck = tcks[i] = upds[uid_add].tck;
 		const f64 vol = vols[i] = upds[uid_add].vol;
-		const u64 tck = _prc_to_tck(ctx, prc); 
 
 		/* Incorporate in best bid / ask. */
 		//debug("add ini %U %U %d.\n", tim, tck, vol);
@@ -117,7 +114,7 @@ static inline void _upds_add_ini(
 
 		/* If buffer full, flush. */
 		if (i == 2 * ctx->tck_nbr) {
-			tb_lv1_add(hst, i, tims, prcs, vols);
+			tb_lv1_add(hst, i, tims, tcks, vols);
 			i = 0;
 		}
 
@@ -125,7 +122,7 @@ static inline void _upds_add_ini(
 
 	/* Add all non-flushed updates. */
 	if (i) {
-		tb_lv1_add(hst, i, tims, prcs, vols);
+		tb_lv1_add(hst, i, tims, tcks, vols);
 	}
 
 	/* Update bid/ask data to reflect the add time. */
@@ -163,7 +160,7 @@ static inline void _upds_add(
 	tb_tst_lv1_ctx *ctx,
 	tb_lv1_hst *hst,
 	u64 *tims,
-	f64 *prcs,
+	u64 *tcks,
 	f64 *vols,
 	u64 tim_add,
 	u64 *uid_addp,
@@ -185,15 +182,13 @@ static inline void _upds_add(
 
 		/* Add to the arrays. */
 		tims[gen_nbr] = tim;
-		const f64 prc = prcs[gen_nbr] = ctx->upds[uid_add].prc;
+		const u64 tck = tcks[gen_nbr] = ctx->upds[uid_add].tck;
 		const f64 vol = vols[gen_nbr] = ctx->upds[uid_add].vol;
-		const u64 tck = _prc_to_tck(ctx, prc); 
-		assert(_tck_to_prc(ctx, tck) == prc);
 
 		/* Add to the history if needed. */ 
 		assert(gen_nbr <= gen_max);
 		if (gen_nbr == gen_max) {
-			tb_lv1_add(hst, gen_nbr, tims, prcs, vols);
+			tb_lv1_add(hst, gen_nbr, tims, tcks, vols);
 		}
 
 		/* Incorporate in best bid / ask. */
@@ -207,7 +202,7 @@ static inline void _upds_add(
 	/* Add remaining updates. */
 	assert(gen_nbr <= gen_max);
 	if (gen_nbr) {
-		tb_lv1_add(hst, gen_nbr, tims, prcs, vols);
+		tb_lv1_add(hst, gen_nbr, tims, tcks, vols);
 	}
 
 	/* Update bid/ask data to reflect the add time. */
@@ -243,9 +238,8 @@ static inline void _upds_mov(
 		if (tim >= tim_cur) break;
 
 		/* Read. */
-		const f64 prc = ctx->upds[uid_cur].prc; 
+		const u64 tck = ctx->upds[uid_cur].tck; 
 		const f64 vol = ctx->upds[uid_cur].vol; 
-		const u64 tck = _prc_to_tck(ctx, prc); 
 
 		/* Incorporate. */
 		const u64 aid = _tim_to_aid(ctx, tim);
@@ -258,12 +252,16 @@ static inline void _upds_mov(
 				chc_sums[rst_idx] = 0;
 			}
 		}
-		assert(tim >= chc_tims[tck]);
-		if (tim != chc_tims[tck]) {
-			chc_sums[tck] += (f64) (tim - chc_tims[tck]) * chc_vols[tck];
+		check(ctx->tck_min <= tck);
+		const u64 idx = tck - ctx->tck_min;
+		check(idx < ctx->tck_nbr);
+
+		assert(tim >= chc_tims[idx]);
+		if (tim != chc_tims[idx]) {
+			chc_sums[idx] += (f64) (tim - chc_tims[idx]) * chc_vols[idx];
 		}
-		chc_vols[tck] = vol;
-		chc_tims[tck] = tim;
+		chc_vols[idx] = vol;
+		chc_tims[idx] = tim;
 
 		/* Increment. */
 		uid_cur++;
@@ -347,7 +345,7 @@ static void _lv1_run(
 	 * which prevents us from overflowing when adding
 	 * updates as the current time (not more than tck_nbr). */
 	u64 *tims = nh_all(2 * tck_nbr * sizeof(u64));
-	f64 *prcs = nh_all(2 * tck_nbr * sizeof(f64));
+	u64 *tcks = nh_all(2 * tck_nbr * sizeof(u64));
 	f64 *vols = nh_all(2 * tck_nbr * sizeof(f64));
 
 	/* Export the global heatmap. */
@@ -360,7 +358,6 @@ static void _lv1_run(
 	 */
 	tb_lv1_hst *hst = tb_lv1_ctr(
 		aid_wid,
-		tck_per_unt,
 		hmp_dim_tck,
 		hmp_dim_tim,
 		bac_siz
@@ -377,12 +374,12 @@ static void _lv1_run(
 			u32 ri = (u32) ((19 * i) % tck_nbr);
 			const f64 vol = ctx->hmp_ini[ri];
 			if (!vol) continue;
-			prcs[nb_non_nul] = _tck_to_prc(ctx, ri);
-			assert(prcs[nb_non_nul]);
+			tcks[nb_non_nul] = _idx_to_tck(ctx, ri);
+			assert(tcks[nb_non_nul]);
 			vols[nb_non_nul] = ctx->hmp_ini[ri];
 			nb_non_nul++;
 		}
-		if (nb_non_nul) tb_lv1_add(hst, nb_non_nul, 0, prcs, vols);
+		if (nb_non_nul) tb_lv1_add(hst, nb_non_nul, 0, tcks, vols);
 		ttl_non_nul += nb_non_nul;
 	}
 	assert(ttl_non_nul, "init with no volume.\n");
@@ -460,7 +457,7 @@ static void _lv1_run(
 	tb_lv1_prp(hst, tim_cur);
 
 	/* Push all updates until @tim_add. */
-	_upds_add_ini(ctx, hst, tims, prcs, vols, tim_add, &uid_add, &bst_bac_aid, &bst_bid, &bst_ask);
+	_upds_add_ini(ctx, hst, tims, tcks, vols, tim_add, &uid_add, &bst_bac_aid, &bst_bid, &bst_ask);
 
 	/* Process. */
 	tb_lv1_prc(hst);
@@ -517,7 +514,7 @@ static void _lv1_run(
 		/* Add updates at the current tick. */
 		_upds_add(
 			ctx, hst,
-			tims, prcs, vols,
+			tims, tcks, vols,
 			tim_add, &uid_add,
 			&bst_bac_aid, &bst_bid, &bst_ask
 		);
@@ -579,7 +576,7 @@ static void _lv1_run(
 
 	/* Free buffers. */ 
 	nh_fre(tims, 2 * tck_nbr * sizeof(u64));
-	nh_fre(prcs, 2 * tck_nbr * sizeof(f64));
+	nh_fre(tcks, 2 * tck_nbr * sizeof(u64));
 	nh_fre(vols, 2 * tck_nbr * sizeof(f64));
 	nh_fre(chc_tims, tck_nbr * sizeof(u64));
 	nh_fre(chc_sums, tck_nbr * sizeof(f64));

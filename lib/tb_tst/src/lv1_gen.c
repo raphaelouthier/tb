@@ -2,6 +2,8 @@
 
 #include <tb_tst/tb_tst.all.h>
 
+#include <tb_tst/lv1_utl.h>
+
 /*
  * Add @obk to @ctx's heatmap at column @col_idx.
  */
@@ -28,39 +30,6 @@ static inline void _hmp_add(
 }
 
 /*
- * Determine the current tick reference given the current
- * bid-ask, the previous tick reference and
- * the heatmap tick dimension.
- */
-static inline u64 _tck_ref(
-	u64 bid,
-	u64 ask,
-	u64 prv,
-	u64 dim
-)
-{
-	u64 ref = 0;
-	u64 mid = dim >> 1;
-	if ((bid != 0) && (ask != (u64) -1)) {
-		ref = (bid + ask) / 2;
-	} else {
-		if (bid != 0) {
-			assert(ask == (u64) -1);
-			ref = bid;
-		} else if (ask != (u64) -1) {
-			assert(bid == 0);
-			ref = ask;
-		} else {
-			assert(ask == (u64) -1);
-			assert(bid == 0);
-			ref = prv;
-			assert(ref >= mid);
-		}
-	}
-	return (ref < mid) ? mid : ref; 
-}
-
-/*
  * Resize the updates arrays.
  */
 static inline void _upd_rsz(
@@ -79,37 +48,6 @@ static inline void _upd_rsz(
 		debug("rsz %U.\n", ctx->upd_max);
 	}
 }
-
-/*
- * Time -> AID.
- */
-static inline u64 _tim_to_aid(
-	tb_tst_lv1_ctx *ctx,
-	u64 tim
-)
-{
-	return (tim - ctx->tim_stt) / ctx->aid_wid;
-}
-
-/*
- * Price -> tick.
- */
-static inline u64 _prc_to_tck(
-	tb_tst_lv1_ctx *ctx,
-	f64 prc
-)
-{
-	assert(prc >= ctx->prc_min);
-	return (u64) (f64) ((prc - ctx->prc_min) * ((f64) ctx->tck_rat + 0.1));
-}
-
-/*
- * Tick -> price.
- */
-static inline f64 _tck_to_prc(
-	tb_tst_lv1_ctx *ctx,
-	u64 tck
-) {return ctx->prc_min + ((f64) tck / (f64) ctx->tck_rat);}
 
 /*
  * Let time pass, return 1 if end time is reached,
@@ -168,25 +106,15 @@ static inline void _bac_upd(
 	u64 bst_bid = 0;
 	u64 bst_ask = (u64) -1;
 	
-
+	/* Determine the best bid and best ask. */
 	tb_obk_bst_bat(
 		obk_cur,
-			
-	for (u64 idx = 0; idx < ctx->tck_nbr; idx++) {
-		const f64 vol = obk_cur[idx];
-		assert(obk_prv[idx] == vol);
-		if (!vol) continue;
-		const u8 is_bid = vol < 0;
-		const u64 tck_idx = ctx->tck_min + idx;
-		assert(tck_idx);
-		assert(tck_idx != (u64) -1);
-		if (is_bid) {
-			assert(bst_ask == (u64) -1); // Bid found at tick below first ask.
-			if (bst_bid < tck_idx) bst_bid = tck_idx;
-		} else {
-			if (bst_ask == (u64) -1) bst_ask = tck_idx;
-		}
-	}
+		ctx->tck_nbr,
+		0, ctx->tck_nbr,
+		ctx->tck_min,
+		&bst_bid, &bst_ask,
+		0, 0
+	);
 	assert(bst_bid < bst_ask);
 
 	/* Incorporate the best bid and best ask. */
@@ -246,7 +174,7 @@ static inline void _bac_prp(
 		 */ 
 		for (u64 idx = aid_lst + 1; idx <= aid_cur; idx++) {
 			if (idx < aid_max) {
-				*tck_refp = ctx->ref_arr[idx] = _tck_ref(prv_bst_bid, prv_bst_ask, *tck_refp, ctx->hmp_dim_tck);
+				*tck_refp = ctx->ref_arr[idx] = tb_obk_anc(prv_bst_bid, prv_bst_ask, *tck_refp, ctx->hmp_dim_tck);
 			}
 		}
 
@@ -308,7 +236,7 @@ static inline void _upd_gen(
 		_upd_rsz(ctx, upd_nbr + 1);
 		check(upd_nbr < ctx->upd_max);
 		ctx->upds[upd_nbr].tim = tim_cur;	
-		ctx->upds[upd_nbr].prc = _tck_to_prc(ctx, tck_idx);
+		ctx->upds[upd_nbr].tck = _idx_to_tck(ctx, tck_idx);
 		ctx->upds[upd_nbr].vol = vol_cur;
 		ctx->upd_nbr++;
 		
@@ -401,7 +329,7 @@ void tb_tst_lv1_upds_gen(
 
 	/* Determine the initial anchoring. */
 	u64 prv_ref = ctx->hmp_dim_tck >> 1;  
-	ctx->ref_arr[0] = prv_ref = _tck_ref(prv_bst_bid, prv_bst_ask, prv_ref, ctx->hmp_dim_tck);
+	ctx->ref_arr[0] = prv_ref = tb_obk_anc(prv_bst_bid, prv_bst_ask, prv_ref, ctx->hmp_dim_tck);
 	//assert(0, "ini %U %U %U.\n", prv_bst_bid, prv_bst_ask, ctx->ref_arr[0]);
 
 	/* Generate as many updates as requested. */ 

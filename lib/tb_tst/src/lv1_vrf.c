@@ -8,6 +8,9 @@
  * Volume comp *
  ***************/
 
+/*
+ * return (|a - b| < 0.001).
+ */
 static inline u8 _f64_eq(
 	f64 a,
 	f64 b
@@ -18,7 +21,6 @@ static inline u8 _f64_eq(
 	return dif < 0.001;
 }
 	
-
 /*****************
  * Updates check *
  *****************/
@@ -38,7 +40,6 @@ static inline void _vrf_hst_upds(
 )
 {
 	const u64 max = uid_add - uid_cln;
-	const u64 tck_min = ctx->tck_min; 
 	u64 idx = 0;
 	tb_lv1_upd *upd;
 	ns_slsh_fe(upd, &hst->upds_hst, upds_hst) {
@@ -48,17 +49,16 @@ static inline void _vrf_hst_upds(
 		assert(idx < max, "update sequence mismatch : too many updates.\n");
 
 		/* Check data. */
-		const f64 prc = src->prc;
-		const u64 tck = _prc_to_tck(ctx, prc);
+		const u64 tck_val = src->tck;
 		assert(
-			(upd->tck->tcks.val == tck_min + tck) &&
+			(upd->tck->tcks.val == tck_val) &&
 			(upd->tim == src->tim) &&
 			(upd->vol == src->vol),
 			"update sequence mismatch at index %U/%U (uid %U/%U) :\n"
-			"\texp (tim : %U, vol : %d, tck : %U (prc : %d)),\n"
+			"\texp (tim : %U, vol : %d, tck : %U),\n"
 			"\tgot (tim : %U, vol : %d, tck : %U).\n",
 			idx, max, uid_cln + idx, uid_add,
-			src->tim, src->vol, tck_min + tck, prc,
+			src->tim, src->vol, tck_val,
 			upd->tim, upd->vol, upd->tck->tcks.val
 		);
 
@@ -83,8 +83,7 @@ static inline void _vrf_hst_upds(
  *********************/
 
 /*
- * Recompute the best bid and ask at current and max
- * times and verify that they match @hst's version.
+ * Verify every tick of @hst.
  */
 static inline u64 _vrf_hst_tcks(
 	tb_tst_lv1_ctx *ctx,
@@ -109,13 +108,11 @@ static inline u64 _vrf_hst_tcks(
 
 	/* Traverse the update list in reverse between add and current. */
 	tck_cnt = tck_nbr;
-	const u64 tck_min = ctx->tck_min; 
 	u64 upd_cnt = 0;
 	for (u64 idx = uid_add - uid_cur; idx--;) {
 		upd_cnt++;
 		tb_tst_lv1_upd *src = ctx->upds + uid_cur + idx;
-		const f64 prc = src->prc;
-		const u64 tck_val = tck_min + _prc_to_tck(ctx, prc);
+		const u64 tck_val = src->tck;
 
 		/* Find the tick for this update. If its flag is already set, nothing to do. */
 		tck = assert(ns_map_sch(&hst->tcks, tck_val, u64, tb_lv1_tck, tcks));
@@ -154,8 +151,7 @@ static inline u64 _vrf_hst_tcks(
 	for (u64 idx = uid_cur - uid_cln; idx--;) {
 		upd_cnt++;
 		tb_tst_lv1_upd *src = ctx->upds + uid_cln + idx;
-		const f64 prc = src->prc;
-		const u64 tck_val = tck_min + _prc_to_tck(ctx, prc);
+		const u64 tck_val = src->tck;
 
 		/* Find the tick for this update. If its flag is already set, nothing to do. */
 		tck = assert(ns_map_sch(&hst->tcks, tck_val, u64, tb_lv1_tck, tcks));
@@ -192,8 +188,7 @@ static inline u64 _vrf_hst_tcks(
 	tck_cnt = tck_nbr;
 	for (u64 uid = uid_cln; uid--;) {
 		tb_tst_lv1_upd *src = ctx->upds + uid;
-		const f64 prc = src->prc;
-		const u64 tck_val = tck_min + _prc_to_tck(ctx, prc);
+		const u64 tck_val = src->tck;
 
 		/* Find the tick for this update. If its flag is already set, nothing to do. */
 		tck = assert(ns_map_sch(&hst->tcks, tck_val, u64, tb_lv1_tck, tcks));
@@ -360,7 +355,7 @@ static inline void _vrf_hst_bac(
 		if (tim_fst > tim_bac) break;
 
 		/* Read the tick. */
-		const u64 tck_val = tck_min + _prc_to_tck(ctx, src->prc);
+		const u64 tck_val = src->tck;
 		check(tck_val >= tck_min);
 		check(tck_val < tck_min + ctx->tck_nbr);
 		obk[tck_val - tck_min] = src->vol;
@@ -370,16 +365,13 @@ static inline void _vrf_hst_bac(
 	u64 bst_bid;
 	u64 bst_ask;
 	#define _get_bsts() ({\
-		bst_bid = 0; bst_ask = (u64) -1; \
-		for (u64 i = 0; i < ctx->tck_nbr; i++) { \
-			const f64 vol = obk[i]; \
-			_bac_dbg("%U : %d.\n", i, vol); \
-			if (vol == 0) continue; \
-			const u64 abs_val = tck_min + i; \
-			const u8 is_bid = vol < 0; \
-			if (is_bid) bst_bid = abs_val; \
-			else if (bst_ask == (u64) -1) bst_ask = abs_val; \
-		} \
+		tb_obk_bst_bat( \
+			obk, ctx->tck_nbr, \
+			0, ctx->tck_nbr, \
+			tck_min, \
+			&bst_bid, &bst_ask, \
+			0, 0 \
+		); \
 		assert(bst_bid < bst_ask); \
 		_bac_dbg("%I : %I\n", bst_bid, bst_ask); \
 	})
@@ -523,10 +515,10 @@ static inline void _vrf_hst_bac(
 			break;
 		}
 
-		_bac_dbg("UPD %U %U %d.\n", tim_upd, _prc_to_tck(ctx, src->prc), src->vol);
+		_bac_dbg("UPD %U %U %d.\n", tim_upd, src->tck, src->vol);
 
 		/* Read the tick. */
-		const u64 tck_val = tck_min + _prc_to_tck(ctx, src->prc);
+		const u64 tck_val = src->tck;
 		check(tck_val >= tck_min);
 		check(tck_val < tck_min + ctx->tck_nbr);
 

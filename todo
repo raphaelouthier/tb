@@ -1,5 +1,5 @@
 
-TODO use OBK functions in lv1 verif.
+TODO IO lib / io part of lvl API that sits on top of STG. 
 
 TODO unit test for the provider.
 
@@ -10,7 +10,6 @@ TODO unit tests for the agent.
 TODO UNIT TESTS TO VERIFY DATA IN LVL.c
 
 TODO OBK unit tests.
-
 
 #######
 # LV1 #

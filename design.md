@@ -26,21 +26,21 @@ Composed of :
 Event-driven cumulated orderbook updates data.
 
 Composed of :
-- time.
-- price tick
-- total volume of pending orders at this tick. 
+- u64 : time.
+- u64 : price tick
+- f64 : total volume of pending orders at this tick. 
 
 ## Level 2
 
 Event-driven order feed.
 
 Composed of :
-- time.
-- order ID.
-- trader ID.
-- order type.
-- order value.
-- order volume.
+- u64 : time.
+- u64 : order ID.
+- u64 : trader ID.
+- u8 : order type.
+- u64 : order tick.
+- f64 : order volume.
 
 # Time
 

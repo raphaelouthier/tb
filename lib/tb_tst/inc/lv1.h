@@ -73,8 +73,8 @@ struct tb_tst_lv1_gen {
  */
 struct tb_tst_lv1_upd {
 
-	/* Price of update. */
-	f64 prc;
+	/* Tick of update. */
+	u64 tck;
 
 	/* Volume of update. */
 	f64 vol;

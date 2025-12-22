@@ -437,7 +437,18 @@ static inline void tb_stg_wrt_lv0(
 }
 
 /*
+ * Level 1 data validation.
+ */
+void tb_stg_val_lv1(
+	tb_stg_blk *blk,
+	tb_stg_blk *prv,
+	void *arg
+);
+
+/*
  * Level 1 data write.
+ * Receives a giga orderbook snapshot to compute the
+ * new block's orderbook snapshot.
  */
 static inline void tb_stg_wrt_lv1(
 	tb_stg_idx *idx,
@@ -445,8 +456,7 @@ static inline void tb_stg_wrt_lv1(
 	const u64 *tim,
 	const f64 *prc,
 	const f64 *vol,
-	void (*val_fnc)(tb_stg_blk *blk, tb_stg_blk *prv, void *val_arg),
-	void *val_arg
+	f64 *gos
 )
 {
 	assert(idx->lvl == 1);
@@ -459,8 +469,8 @@ static inline void tb_stg_wrt_lv1(
 			(const void *) vol,
 		},
 		3,
-		val_fnc,
-		val_arg
+		&tb_stg_val_lv1,
+		(void *) gos
 	);
 }
 	

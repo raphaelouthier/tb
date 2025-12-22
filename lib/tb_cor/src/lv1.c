@@ -13,19 +13,6 @@ tb_lib_log_def(cor, lv1);
  *******************/
 
 /*
- * If @vol is a bid, return 0.
- * If it is an ask, return 1.
- * It should not be null.
- */
-static inline u8 _is_ask(
-	f64 vol
-)
-{
-	assert(vol != (f64) 0);
-	return vol > 0;
-}	
-
-/*
  * Return the value for a best bid tick, null or not.
  */
 static inline u64 _bst_bid_val(
@@ -38,35 +25,6 @@ static inline u64 _bst_bid_val(
 static inline u64 _bst_ask_val(
 	tb_lv1_tck *tck
 ) {return (tck) ? tck->tcks.val : (u64) -1;}
-
-/******************
- * Price <=> tick *
- ******************/
-
-/*
- * Price -> tick.
- */
-static inline u64 _prc_to_tck(
-	tb_lv1_hst *hst,
-	f64 prc
-)
-{
-	check(prc > 0);
-	return (u64) (f64) ((f64) prc * (f64) hst->tck_rat + 0.1); 
-}
-
-/*
- * Tick -> price.
- */
-static inline f64 _tck_to_prc(
-	tb_lv1_hst *hst,
-	u64 tck
-)
-{
-	check(tck != 0);
-	check(tck != (u64) -1);
-	return (f64) tck * hst->prc_rat;
-}
 
 /*******************
  * Time conversion *
@@ -241,7 +199,7 @@ static inline void _ask_prp(
 	else { \
 \
 		/* Determine if bid or ask, read the tick. */ \
-		const u8 is_ask = _is_ask(vol); \
+		const u8 is_ask = tb_obk_is_ask(vol); \
 		/* debug("typ %d %s.\n", vol, is_ask ? "ask" : "bid"); */ \
 		const u64 tck_val = tck->tcks.val; \
 \
@@ -800,30 +758,20 @@ static inline u64 _tck_ref_cpt(
 	tb_lv1_tck *bid = hst->bst_cur_bid;
 	tb_lv1_tck *ask = hst->bst_cur_ask;
 
-	/* Choose the current reference price based on their
-	 * existence. */
-	u64 tck_ref = 0;
-	if (bid && ask) {
-		tck_ref = (bid->tcks.val + ask->tcks.val) / 2; 
-		//assert(0, "tck_ref bid %U ask %U val %U.\n", bid->tcks.val, ask->tcks.val, tck_ref);
-	} else if (!(bid || ask)) {
-		tck_ref = hst->tck_ref;
-		debug("orderbook empty.\n");
-	} else if (bid) {
-		tck_ref = bid->tcks.val;
-		debug("no asks in orderbook.\n");
-	} else {
-		check(ask);
-		tck_ref = ask->tcks.val;
-		debug("no bids in orderbook.\n");
-	}
+	/* Determine the best values. */
+	const u64 bst_bid = _bst_bid_val(bid);
+	const u64 bst_ask = _bst_ask_val(ask);
+
+	/* Get the anchor. */
+	const u64 tck_ref = tb_obk_anc(
+		bst_bid,
+		bst_ask,
+		hst->tck_ref, 
+		hst->hmp_dim_tck
+	);
 
 	/* Check integrity and complete. */
-	const u64 tck_min = hst->hmp_dim_tck >> 1;
-	if (tck_ref < tck_min) {
-		tck_ref = tck_min;
-		debug("price fell too low, offseting the heatmap.\n");
-	}
+	assert(tck_ref >= (hst->hmp_dim_tck >> 1));
 	return tck_ref;
 }
 
@@ -902,13 +850,11 @@ static inline void _upd_dtr(
  */
 tb_lv1_hst *tb_lv1_ctr(
 	u64 tim_res,
-	u64 tck_rat,
 	u64 hmp_dim_tim,
 	u64 hmp_dim_tck,
 	u64 bac_nb
 )
 {
-	assert(tck_rat >= 1);
 	assert(tim_res);
 	assert(hmp_dim_tim);
 	assert(hmp_dim_tck);
@@ -929,8 +875,6 @@ tb_lv1_hst *tb_lv1_ctr(
 	hst->bac_nb = bac_nb;
 	hst->hmp_tim_spn = (hmp_dim_tim) * tim_res;
 	hst->bac_tim_spn = bac_nb * tim_res;
-	hst->tck_rat = (f64) tck_rat;
-	hst->prc_rat = (f64) 1 / (f64) tck_rat;
 
 	/* Reset times. */
 	hst->tim_cur = 0;
@@ -1092,7 +1036,7 @@ void tb_lv1_add(
 	tb_lv1_hst *hst,
 	u64 upd_nb,
 	u64 *tims,
-	f64 *prcs,
+	u64 *tcks,
 	f64 *vols
 )
 {
@@ -1113,12 +1057,10 @@ void tb_lv1_add(
 
 		/* Read arrays. */
 		const u64 tim = (ini) ? 0 : tims[upd_id];
-		const f64 prc = prcs[upd_id];
+		const u64 tck_val = tcks[upd_id];
 		const f64 vol = vols[upd_id];
-		const u64 tck_val = _prc_to_tck(hst, prc);
-		check(tck_val == _prc_to_tck(hst, _tck_to_prc(hst, tck_val)));
 
-		tb_lv1_log("add : ord : %U %d(%U) %d.\n", tim, prc, tck_val, vol);
+		tb_lv1_log("add : ord : %U %U %d.\n", tim, tck_val, vol);
 	
 		/* Ensure time is monotonic and in prepared range. */
 		assert(tim_max <= tim);

@@ -1084,3 +1084,42 @@ void tb_stg_wrt(
 
 }
 
+/**************
+ * Validation *
+ **************/
+
+/*
+ * Level 1 data validation.
+ */
+void tb_stg_val_lv1(
+	tb_stg_blk *blk,
+	tb_stg_blk *prv,
+	void *arg
+)
+{
+
+	/* Expect a giga orderbook snapshot as arg, and @blk
+	 * non-null. @prv can be null when @blk is the
+	 * first block. */
+	f64 *const gos = arg;
+	assert(blk);
+	
+	/* Get orderbook snapshots. */
+	const void *src = (prv) ? tb_stg_std(prv) : 0;
+	void *dst = tb_stg_std(blk);
+
+	/* Get arrays. */
+	const void *arrs[3];
+	const u8 *sizs;
+	const u64 upd_nbr = tb_blk_arr(blk, arrs, 3, &sizs); 
+
+	/* Generate the new snapshot. */
+	tb_obk_gen(
+		dst, src,
+		gos, 
+		upd_nbr,
+		arrs[1], arrs[2]
+	);
+
+}
+

@@ -3,33 +3,98 @@
 #ifndef TB_COR_OBK_H
 #define TB_COR_OBK_H
 
+/**********************
+ * Orderbook snapshot *
+ **********************/
+
 /*
- * Return @obs's start (<=) price.
+ * Return @obs's start (<=) tick.
  */
 static inline u64 tb_obs_stt(
-	void *obs
+	const void *obs
 ) {return *((u64 *) obs);}
 
 /*
- * Return @obs's (<) end price.
+ * Return @obs's (<) end tick.
  */
 static inline u64 tb_obs_end(
-	void *obs
+	const void *obs
 ) {return tb_obs_stt(obs) + TB_LVL_OBS_NB;}
 
 /*
- * Return @obs's mid price.
+ * Return @obs's mid tick.
  */
 static inline u64 tb_obs_mid(
-	void *obs
+	const void *obs
 ) {return tb_obs_stt(obs) + (TB_LVL_OBS_NB >> 1);}
 
 /*
- * Return @obs's price array.
+ * Return @obs's volume array.
  */
 static inline void *tb_obs_arr(
-	void *obs
+	const void *obs
 ) {return ns_psum(obs, sizeof(u64));}
+
+/*
+ * Set @obs's start tick.
+ */
+static inline u64 tb_obs_set(
+	void *obs,
+	u64 stt
+) {return *((u64 *) obs) = stt;}
+
+/*
+ * From the orderbook snapshot at T0, located at @src,
+ * and the updates between T0 and T1, generate the
+ * orderbook snapshot for T1 at @dst.
+ * Use the giga orderbook snapshot at @gos.
+ * Return 1 if there was a data loss during
+ * the transfer from @gos to @dst.
+ * Return 0 if all data did fit in @dst.
+ */
+uerr tb_obk_gen(
+	void *dst,
+	const void *src,
+	f64 *gos,
+	u64 upd_nbr,
+	const u64 *upd_tcks,
+	const f64 *upd_vols
+);
+
+/***************************
+ * Giga orderbook snapshot *
+ ***************************/
+
+/*
+ * Allocate and return a giga orderbook snapshot.
+ */
+static inline f64 *tb_gos_all(
+	void
+) {return nh_all(sizeof(f64) * TB_LVL_GOS_NB);}
+
+/*
+ * Free @gos.
+ */
+static inline void tb_gos_fre(
+	f64 *gos
+) {return nh_fre(gos, sizeof(f64) * TB_LVL_GOS_NB);}
+
+/*************
+ * Orderbook *
+ *************/
+
+/*
+ * If @vol is a bid, return 0.
+ * If @vol is an ask, return 1.
+ * It must not be null.
+ */
+static inline u8 tb_obk_is_ask(
+	f64 vol
+)
+{
+	check(vol != 0);
+	return vol > 0;
+}
 
 /*
  * Update @dst of @dst_nbr elements starting at @dst_stt
@@ -42,7 +107,7 @@ static inline uerr tb_obk_add(
 	f64 *dst,
 	u64 dst_stt,
 	u64 dst_nbr,
-	f64 *src,
+	const f64 *src,
 	u64 src_stt,
 	u64 src_nbr
 )
@@ -87,7 +152,7 @@ static inline uerr tb_obk_add_obs(
 	f64 *obk,
 	u64 obk_stt,
 	u64 obk_nbr,
-	void *obs
+	const void *obs
 )
 {
 	return tb_obk_add(
@@ -105,7 +170,7 @@ static inline uerr tb_obk_add_obs(
  * from the ordebrook @obk of @nbr elements starting at @stt,
  */
 static inline uerr tb_obk_xtr_obs(
-	f64 *obk,
+	const f64 *obk,
 	u64 obk_stt,
 	u64 obk_nbr,
 	void *obs
@@ -131,8 +196,8 @@ static inline void tb_obk_add_upds(
 	u64 obk_stt,
 	u64 obk_nbr,
 	u64 upd_nbr,
-	u64 *tcks,
-	f64 *vols,
+	const u64 *tcks,
+	const f64 *vols,
 	u64 *tck_minp,
 	u64 *tck_maxp
 )
@@ -161,10 +226,11 @@ static inline void tb_obk_add_upds(
  * Otherwise, return 0.
  */
 static inline uerr tb_obk_bst_bat(
-	f64 *obk,
+	const f64 *obk,
 	u64 obk_nbr,
 	u64 stt,
 	u64 end,
+	u64 tck_off,
 	u64 *bst_bidp,
 	u64 *bst_askp,
 	u64 *wst_bidp,
@@ -188,6 +254,8 @@ static inline uerr tb_obk_bst_bat(
 	for (u64 obk_idx = stt; obk_idx < end; obk_idx++) {
 		const f64 vol = obk[obk_idx];
 		if (vol == 0) continue;
+		const u64 tck_idx = obk_idx + tck_off;
+		check(obk_idx <= tck_idx);
 		const u8 is_bid = (vol < 0);
 
 		/* If bid : */
@@ -195,12 +263,12 @@ static inline uerr tb_obk_bst_bat(
 
 			/* If no bid before, report as worst bid. */ 
 			if (!was_bid) {
-				wst_bid = obk_idx;
+				wst_bid = tck_idx;
 				was_bid = 1;
 			}
 
 			/* Report as best bid. */
-			bst_bid = obk_idx;
+			bst_bid = tck_idx;
 
 			/* Detect inversion. */
 			if (was_ask) inv = 1;
@@ -213,12 +281,12 @@ static inline uerr tb_obk_bst_bat(
 
 			/* If no ask before, report as best ask. */
 			if (!was_ask) {
-				bst_ask = obk_idx;
+				bst_ask = tck_idx;
 				was_ask = 1;
 			}
 
 			/* Report as worst ask. */
-			wst_ask = obk_idx;
+			wst_ask = tck_idx;
 
 		}
 		
@@ -246,12 +314,14 @@ static inline uerr tb_obk_bst_bat(
 /*
  * Return an orderbook anchor price
  * given its best bid (may be 0 if no bid),
- * its best ask (may be -1 if no ask) and the
- * orderbook size.
+ * its best ask (may be -1 if no ask), the
+ * orderbook size, and the previous anchor value,
+ * to use if no bid or ask exist.
  */
 static inline u64 tb_obk_anc(
 	u64 bst_bid,
 	u64 bst_ask,
+	u64 prv,
 	u64 obk_siz
 )
 {
@@ -259,41 +329,20 @@ static inline u64 tb_obk_anc(
 	const u8 no_bid = (bst_bid == 0);
 	const u8 no_ask = (bst_ask == (u64) -1);
 	const u64 anc_min = obk_siz >> 1;
+	check(prv >= anc_min);
 	u64 anc;
 	if (no_bid && no_ask) {
-		anc = anc_min;
+		anc = prv;
 	} else if (no_bid) {
 		anc = bst_ask;
 	} else if (no_ask) {
 		anc = bst_bid;
 	} else {
-		u64 sum = bst_bid + bst_ask;
+		const u64 sum = bst_bid + bst_ask;
 		assert(bst_ask < sum);
 		anc = (sum) >> 1;
 	}
 	return (anc < anc_min) ? anc_min : anc;
 }
-
-/**********************
- * Orderbook snapshot *
- **********************/
-
-/*
- * From the orderbook snapshot at T0, located at @src,
- * and the updates between T0 and T1, generate the
- * orderbook snapshot for T1 at @dst.
- * Use the giga orderbook snapshot at @gos.
- * Return 1 if there was a data loss during
- * the transfer from @gos to @dst.
- * Return 0 if all data did fit in @dst.
- */
-uerr tb_obk_gen(
-	void *dst,
-	void *src,
-	f64 *gos,
-	u64 upd_nbr,
-	u64 *upd_tcks,
-	f64 *upd_vols
-);
 
 #endif /* TB_COR_OBK_H */

@@ -174,12 +174,6 @@ struct tb_lv1_hst {
 	/* Bid / ask curves time span. */
 	u64 bac_tim_spn;
 
-	/* Number of ticks per price unit. */
-	f64 tck_rat;
-
-	/* Inverse. */
-	f64 prc_rat;
-
 	/*
 	 * Times.
 	 */
@@ -279,7 +273,6 @@ tb_lib_log_dec(cor, lv1);
  */
 tb_lv1_hst *tb_lv1_ctr(
 	u64 tim_res,
-	u64 prc_res,
 	u64 hmp_dim_tck,
 	u64 hmp_dim_tim,
 	u64 bac_nb
@@ -321,7 +314,7 @@ void tb_lv1_add(
 	tb_lv1_hst *hst,
 	u64 upd_nb,
 	u64 *tims,
-	f64 *prcs,
+	u64 *tcks,
 	f64 *vols
 );
 

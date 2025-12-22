@@ -99,7 +99,7 @@ static void _upds_log(
 {
 	debug("Tick of ctx %p in [%U, %U[ : ", ctx, uid_stt, uid_end);
 	while (uid_stt < uid_end) {
-		debug("  upd %U : tim : %U, tck : %U, vol : %d, prc : %d.\n", uid_stt, ctx->upds[uid_stt].tim, _prc_to_tck(ctx, ctx->upds[uid_stt].prc), ctx->upds[uid_stt].vol, ctx->upds[uid_stt].prc); 
+		debug("  upd %U : tim : %U, tck : %U, vol : %d.\n", uid_stt, ctx->upds[uid_stt].tim, ctx->upds[uid_stt].tck, ctx->upds[uid_stt].vol); 
 		uid_stt++;
 	}
 }
@@ -117,9 +117,8 @@ static void _upds_log_at(
 {
 	debug("Tick of ctx %p in [%U, %U[ : ", ctx, uid_stt, uid_end);
 	while (uid_stt < uid_end) {
-		const f64 prc = ctx->upds[uid_stt].prc;
-		const u64 tck = _prc_to_tck(ctx, prc);
-		debug("  upd %U : tim : %U, tck : %U, vol : %d, prc : %d.\n", uid_stt, ctx->upds[uid_stt].tim, tck, ctx->upds[uid_stt].vol, prc); 
+		const u64 tck = ctx->upds[uid_stt].tck;
+		debug("  upd %U : tim : %U, tck : %U, vol : %d.\n", uid_stt, ctx->upds[uid_stt].tim, tck, ctx->upds[uid_stt].vol); 
 		uid_stt++;
 	}
 }
