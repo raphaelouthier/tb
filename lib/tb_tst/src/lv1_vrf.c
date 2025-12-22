@@ -981,7 +981,7 @@ void tb_tst_lv1_vrf_hst_res(
 		0;
 
 	/* Compare each value in the heatmap. */
-	debug("%U %U.\n", hmp_min, hmp_nbr);
+	//debug("%U %U.\n", hmp_min, hmp_nbr);
 	u64 chk_nbr = 0;
 	const u64 cel_stt = hst->tim_hmp - hst->tim_res; 
 	assert(cel_stt < tim_cur);

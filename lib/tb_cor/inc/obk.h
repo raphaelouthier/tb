@@ -162,7 +162,6 @@ static inline void tb_obk_add_upds(
  */
 static inline uerr tb_obk_bst_bat(
 	f64 *obk,
-	u64 obk_stt,
 	u64 obk_nbr,
 	u64 stt,
 	u64 end,
@@ -175,6 +174,8 @@ static inline uerr tb_obk_bst_bat(
 	assert(stt < obk_nbr);
 	assert(end <= obk_nbr);
 	assert(stt < end);
+	check((!bst_bidp) == (!bst_askp));
+	check((!wst_bidp) == (!wst_askp));
 	uerr inv = 0;
 
 	/* Traverse the [@stt, @end[ range. */ 
@@ -228,10 +229,14 @@ static inline uerr tb_obk_bst_bat(
 	check(bst_ask <= wst_ask);
 
 	/* Forward results. */
-	*bst_bidp = bst_bid;
-	*bst_askp = bst_ask;
-	*wst_bidp = wst_bid;
-	*wst_askp = wst_ask;
+	if (bst_bidp) {
+		*bst_bidp = bst_bid;
+		*bst_askp = bst_ask;
+	}
+	if (wst_bidp) {
+		*wst_bidp = wst_bid;
+		*wst_askp = wst_ask;
+	}
 
 	/* Report any inversion. */
 	return inv;

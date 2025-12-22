@@ -80,7 +80,6 @@ uerr tb_obk_gen(
 	u64 wst_ask = (u64) -1;
 	tb_obk_bst_bat(
 		gos,
-		gos_stt,
 		TB_LVL_GOS_NB,
 		bac_stt,
 		bac_end,

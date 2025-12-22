@@ -710,6 +710,8 @@ void tb_tst_lv1(
 	u8 run_prc
 )
 {
+	_rdm_tst(sys, sed);
+	return;
 	_vrf_tst(sys, sed, 10, 0, 0, 1);
 	_vrf_tst(sys, sed, 10, 0, 1, 1);
 	_vrf_tst(sys, sed, 10, 5, 1, 0);

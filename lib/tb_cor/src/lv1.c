@@ -386,7 +386,7 @@ static inline void _hst_bas_max_upd(
 	 * If best ask update :
 	 */
 	if (ask_upd) {
-		debug("ask upd %U %U %U %U.\n", bac_aid, ask_aid - bac_aid, prp_aid - bac_aid, _bst_ask_val(prv_bst_ask));
+		//debug("ask upd %U %U %U %U.\n", bac_aid, ask_aid - bac_aid, prp_aid - bac_aid, _bst_ask_val(prv_bst_ask));
 
 		/* Propagate ask values. */
 		_ask_prp(hst, bac_aid, ask_aid, prp_aid, prv_bst_ask);
@@ -522,8 +522,8 @@ static inline void _hst_hmp_mov(
 		return;
 	}
 
-	debug("pre :\n");
-	_hmp_log(hst);
+	//debug("pre :\n");
+	//_hmp_log(hst);
 
 	debug("shf %U %I.\n", shf_tim, shf_tck);
 	#if 0
@@ -546,8 +546,8 @@ static inline void _hst_hmp_mov(
 	}
 	#endif
 
-	debug("post :\n");
-	_hmp_log(hst);
+	//debug("post :\n");
+	//_hmp_log(hst);
 
 }
 
@@ -567,7 +567,7 @@ static inline void _hmp_wrt_row(
 )
 {
 
-	debug("wrt_dat %U %U.\n", row_id, wrt_nb);
+	//debug("wrt_dat %U %U.\n", row_id, wrt_nb);
 	/*
 	 * Utils.
 	 */
@@ -615,13 +615,13 @@ static inline void _hmp_wrt_row(
 
 	/* If no data, just write the current volume. */
 	if (!upd) {
-		u64 wrt_cnt = 0;
+		//u64 wrt_cnt = 0;
 		for (u64 col_id = hst->hmp_dim_tim; (col_id--) && wrt_nb--;) {
-			wrt_cnt++;
-			debug("  rs %U %U %d.\n", row_id, col_id, vol_cur); 
+			//wrt_cnt++;
+			//debug("  rs %U %U %d.\n", row_id, col_id, vol_cur); 
 			HMP_LOC(col_id, row_id) = vol_cur;	
 		}
-		debug("wrt_cnt %U.\n", wrt_cnt);
+		//debug("wrt_cnt %U.\n", wrt_cnt);
 		return;
 	}
 
@@ -630,20 +630,20 @@ static inline void _hmp_wrt_row(
 	check(!(hst->tim_hmp % tim_res)); 
 	check(!(hst->hmp_tim_spn % tim_res)); 
 	const u64 aid_hmp = (hst->tim_hmp - hst->hmp_tim_spn) / tim_res;  
-	u64 wrt_cnt = 0;
+	//u64 wrt_cnt = 0;
 	for (u64 col_id = hst->hmp_dim_tim; (col_id--) && wrt_nb--;) {
 		check((upd) || (vol_stt == vol_cur));
-		debug("col %U, [%U, %U[, cur %U.\n", col_id, tim_res * (aid_hmp + col_id), tim_res * (aid_hmp + col_id + 1), tim_cur);
+		//debug("col %U, [%U, %U[, cur %U.\n", col_id, tim_res * (aid_hmp + col_id), tim_res * (aid_hmp + col_id + 1), tim_cur);
 
 		/* If no update anymore, just write the start volume. */
 		if (!upd) {
-			debug("  end %U %U %d.\n", row_id, col_id, vol_stt); 
+			//debug("  end %U %U %d.\n", row_id, col_id, vol_stt); 
 			HMP_LOC(col_id, row_id) = vol_stt;	
-			wrt_cnt++;
+			//wrt_cnt++;
 			continue;
 		}
 
-		debug("  UPD0 %U %d.\n", upd->tim, upd->vol);
+		//debug("  UPD0 %U %d.\n", upd->tim, upd->vol);
 
 		/* The previous update should be in or before
 		 * this cell.
@@ -653,16 +653,16 @@ static inline void _hmp_wrt_row(
 		check(aid_upd <= aid_col);
 		#ifdef DEBUG
 		tb_lv1_upd *nxt = _upd_nxt(upd);
-		if (nxt) debug("  NXT0 %U %d, %U %U.\n", nxt->tim, nxt->vol, nxt->tim / tim_res, aid_col);
+		//if (nxt) debug("  NXT0 %U %d, %U %U.\n", nxt->tim, nxt->vol, nxt->tim / tim_res, aid_col);
 		check((!nxt) || ((nxt->tim / tim_res) > aid_col));
 		#endif
 
 		/* If the previous update is before this cell,
 		 * just write the current volume. */
 		if (aid_upd < aid_col) {
-			debug("  bef %U %U %d.\n", row_id, col_id, vol_stt); 
+			//debug("  bef %U %U %d.\n", row_id, col_id, vol_stt); 
 			HMP_LOC(col_id, row_id) = vol_cur;	
-			wrt_cnt++;
+			//wrt_cnt++;
 			continue;
 		}
 
@@ -678,8 +678,8 @@ static inline void _hmp_wrt_row(
 		while (1) {
 			check((upd) || (vol_stt == vol_cur));
 
-			if (upd) debug("  UPDI %U %d.\n", upd->tim, upd->vol);
-			else debug("  UPDI null.\n");
+			//if (upd) debug("  UPDI %U %d.\n", upd->tim, upd->vol);
+			//else debug("  UPDI null.\n");
 
 			/* Compute the current calculation attrs.
 			 * If no more updates, use the current volume
@@ -720,14 +720,14 @@ static inline void _hmp_wrt_row(
 
 		/* Compute the average. */
 		const f64 vol_avg = wgt_sum / (f64) tim_ttl;
-		debug("  avg %U %U %d (%d / %U).\n", row_id, col_id, vol_avg, wgt_sum, tim_ttl); 
+		//debug("  avg %U %U %d (%d / %U).\n", row_id, col_id, vol_avg, wgt_sum, tim_ttl); 
 		HMP_LOC(col_id, row_id) = vol_avg;	
 
-		wrt_cnt++;
+		//wrt_cnt++;
 
 	}
 
-	debug("wrt_cnt %U.\n", wrt_cnt);
+	//debug("wrt_cnt %U.\n", wrt_cnt);
 
 }
 
@@ -1325,8 +1325,8 @@ void tb_lv1_prc(
 
 	}
 
-	debug("Res : \n");
-	_hmp_log(hst);
+	//debug("Res : \n");
+	//_hmp_log(hst);
 
 }
 

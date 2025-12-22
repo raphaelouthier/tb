@@ -164,8 +164,14 @@ static inline void _bac_upd(
 	u64 aid_prv
 )
 {
+	assert(!ns_mem_cmp(obk_cur, obk_prv, ctx->tck_nbr * sizeof(f64)));
 	u64 bst_bid = 0;
 	u64 bst_ask = (u64) -1;
+	
+
+	tb_obk_bst_bat(
+		obk_cur,
+			
 	for (u64 idx = 0; idx < ctx->tck_nbr; idx++) {
 		const f64 vol = obk_cur[idx];
 		assert(obk_prv[idx] == vol);
