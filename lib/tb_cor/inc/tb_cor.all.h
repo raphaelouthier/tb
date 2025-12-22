@@ -16,6 +16,10 @@
 #include <tb_cor/wlt.h>
 #include <tb_cor/sgm.h>
 #include <tb_cor/stg.h>
+#include <tb_cor/lvl.h>
 #include <tb_cor/lv1.h>
+#include <tb_cor/obk.h>
+#include <tb_cor/prv.h>
+#include <tb_cor/bkr.h>
 
 #endif /* TB_COR_ALL_H */

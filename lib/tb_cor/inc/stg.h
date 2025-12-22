@@ -19,32 +19,6 @@ types(
  **************/
 
 /*
- * Every block's region 0 is reserved for its sync
- * data, which occupies the first page.
- */
-#define TB_STG_RGN_SIZ_SYN TB_SGM_PAG_SIZ
-
-/*
- * Levels 1 and 2 contain a snapshot of the orderbook
- * at the end of the block, so that orderbook
- * reconstruction does not need to go many blocks behind.
- * The snapshot of the orderbook is composed of :
- * - nb, the number of tick levels saved (constant).
- * - prc, the tick of the first volume element.
- * - the volumes of the @nb ticks >= @prc, stored in
- *   incremental tick levels starting at @prc.  
- */
-
-/*
- * Number of tick levels saved in orderbook snapshot.
- * TODO review this.
- */ 
-#define TB_STG_OBS_NB 1024 
-
-/* Number of bytes of an orderbook snapshot region. */
-#define TB_STG_RGN_SIZ_OBS ((sizeof(u64)) + ((TB_STG_OBS_NB) * sizeof(f64))) 
-
-/*
  * A data block is composed of first tier data fetched
  * directly from a provider, and of second tier data,
  * derived from first tier data of this block, or from
@@ -138,7 +112,7 @@ struct tb_stg_sys {
 	ns_map_str idxs;
 
 	/* Number of active data interfaces. */
-	u32 itf_nb;
+	u32 itf_nbr;
 
 	/* Segments initializer scratch. */
 	void *ini;
@@ -236,16 +210,72 @@ _own_ tb_stg_blk *tb_stg_lod_tim(
 );
 
 /*
+ * Return @blk's max number of elements.
+ */
+static inline u64 tb_stg_blk_max(
+	tb_stg_blk *blk
+) {return tb_sgm_elm_max(blk->sgm);}
+
+/*
+ * Return @blk's max number of elements.
+ */
+static inline u64 tb_stg_elm_nbr(
+	tb_stg_blk *blk
+) {return tb_sgm_elm_nbr(blk->sgm);}
+
+/*
  * Initialize @dsts with @blk's arrays, set *@sizsp with
  * the array containing its element sizes, return its
  * number of elements.
  */
-u64 tb_sgm_arr_(
+u64 tb_blk_arr(
 	tb_stg_blk *blk,
 	const void **dsts,
-	u8 dst_nb,
+	u8 dst_nbr,
 	const u8 **sizsp
 );
+
+/*
+ * Find the index of the first element >= @tim.
+ */
+static inline u64 tb_stg_elm_sch(
+	u64 *tims,
+	u64 elm_nbr,
+	u64 stt,
+	u64 tim
+)
+{
+
+	/* Search in times. */
+	assert(stt < elm_nbr);
+	assert(tim <= tims[elm_nbr - 1]); /* Wrong block. */
+	for (u64 elm_idx = stt; elm_idx < elm_nbr; elm_idx++) {
+		if (tim <= tims[elm_idx]) {
+			return elm_idx;
+		}
+	}
+
+	/* Element not found. Not possible. */
+	assert(0);
+	return 0;
+}
+
+/*
+ * Shift arrays in @dst of @shf.
+ */
+static inline void tb_stg_shf(
+	const void **dsts,
+	const void **srcs,
+	const u8 *sizs,
+	u8 arr_nbr,
+	u64 shf
+)
+{
+	for (u8 arr_idx = 0; arr_idx < arr_nbr; arr_idx++) {
+		dsts[arr_idx] = srcs[arr_idx] + sizs[arr_idx] * shf;
+	}
+}
+	
 
 /*
  * Same as above but initialize @dsts and the return
@@ -256,28 +286,20 @@ static inline u64 tb_sgm_arr(
 	tb_stg_blk *blk,
 	u64 tim,
 	const void **dsts,
-	u8 dst_nb
+	u8 dst_nbr
 )
 {
-	assert(dst_nb);
+	assert(dst_nbr);
 	const u8 *sizs = 0;
-	u64 nb = tb_sgm_arr_(blk, dsts, dst_nb, &sizs);
-	assert(nb);
+	u64 elm_nbr = tb_blk_arr(blk, dsts, dst_nbr, &sizs);
+	assert(elm_nbr);
 	assert(sizs);
-	const u64 *tims = dsts[0];
-	assert(tim <= tims[nb - 1]); /* Wrong block. */
-	for (u64 elm_id = 0; elm_id < nb; elm_id++) {
-		if (tim <= tims[elm_id]) {
-			for (u8 arr_id = 0; arr_id < dst_nb; arr_id++) {
-				dsts[arr_id] += sizs[arr_id] * elm_id;
-			}
-			return nb - elm_id;
-		}
-	}
 
-	/* Element not found. Not possible. */
-	assert(0);
-	return 0;
+	/* Find the first time. */
+	const u64 elm_idx = tb_stg_elm_sch((u64 *) dsts[0], elm_nbr, 0, tim); 
+	assert(elm_idx < elm_nbr);
+	tb_stg_shf(dsts, dsts, sizs, dst_nbr, elm_idx);
+	return elm_nbr - elm_idx;
 	
 }
 
@@ -321,17 +343,19 @@ static inline tb_stg_blk *tb_stg_red_fst(
 
 /*
  * Iteration next.
+ * Unload @blk if specified.
  */
 tb_stg_blk *tb_stg_red_nxt(
 	tb_stg_idx *idx,
 	tb_stg_blk *blk,
-	u64 end
+	u64 end,
+	u8 unl_blk
 );
 
 /*
  * Stream values of @idx in [@tim_stt, @tim_end].
  */
-#define tb_stg_red(idx, tim_stt, tim_end, dsts, dst_nb) \
+#define tb_stg_red(idx, tim_stt, tim_end, dsts, dst_nbr) \
 	ns_def_stt() \
 	ns_def_(u64, __tim, tim_stt) \
 	ns_def_(u64, __end, tim_end) \
@@ -340,42 +364,18 @@ tb_stg_blk *tb_stg_red_nxt(
 	for ( \
 		tb_stg_blk *__blk = tb_stg_red_fst(idx, __tim, __end); \
 		__blk; \
-		__blk = tb_stg_red_nxt(idx, __blk, __end) \
+		__blk = tb_stg_red_nxt(idx, __blk, __end, 1) \
 	) \
 	for ( \
-		u64 __blk_nb = ({u64 __nb = tb_sgm_arr(__blk, __tim, dsts, dst_nb); __tims = dsts[0]; __nb;}), blk_id = 0; \
-	   __tim = __tims[blk_id], (__tim <= __end) && (blk_id < __blk_nb); \
+		u64 __blk_nbr = ({u64 __nbr = tb_sgm_arr(__blk, __tim, dsts, dst_nbr); __tims = dsts[0]; __nbr;}), blk_id = 0; \
+	   __tim = __tims[blk_id], (__tim <= __end) && (blk_id < __blk_nbr); \
 	   blk_id++ \
 	)
 
 /*
- * If @blk is validated, return 0.
- * If @blk is not validated, return 1.
- */
-uerr tb_stg_val_get(
-	tb_stg_blk *blk
-);
-
-/*
- * Attempt to acquire the ownership of @blk's validation.
- * If success, return 0.
- * If someone already acquired it, return 1.
- */
-uerr tb_stg_val_ini(
-	tb_stg_blk *blk
-);
-
-/*
- * Report @blk validated.
- */
-void tb_stg_val_set(
-	tb_stg_blk *blk
-);
-
-/*
  * Return @blk's second tier data.
  */
-static inline void *tb_sgm_std(
+static inline void *tb_stg_std(
 	tb_stg_blk *blk
 ) {return tb_sgm_rgn(blk->sgm, 1);}
 
@@ -399,7 +399,9 @@ void tb_stg_wrt(
 	tb_stg_idx *idx,
 	u64 nb,
 	const void **srcs,
-	u8 arr_nb
+	u8 arr_nbr,
+	void (*val_fnc)(tb_stg_blk *blk, tb_stg_blk *prv, void *val_arg),
+	void *val_arg
 );
 
 /*
@@ -412,7 +414,9 @@ static inline void tb_stg_wrt_lv0(
 	const f64 *bid,
 	const f64 *ask,
 	const f64 *avg,
-	const f64 *vol
+	const f64 *vol,
+	void (*val_fnc)(tb_stg_blk *blk, tb_stg_blk *prv, void *val_arg),
+	void *val_arg
 )
 {
 	assert(idx->lvl == 0);
@@ -426,7 +430,9 @@ static inline void tb_stg_wrt_lv0(
 			(const void *) avg,
 			(const void *) vol,
 		},
-		5
+		5,
+		val_fnc,
+		val_arg
 	);
 }
 
@@ -438,7 +444,9 @@ static inline void tb_stg_wrt_lv1(
 	u64 nb,
 	const u64 *tim,
 	const f64 *prc,
-	const f64 *vol
+	const f64 *vol,
+	void (*val_fnc)(tb_stg_blk *blk, tb_stg_blk *prv, void *val_arg),
+	void *val_arg
 )
 {
 	assert(idx->lvl == 1);
@@ -450,7 +458,9 @@ static inline void tb_stg_wrt_lv1(
 			(const void *) prc,
 			(const void *) vol,
 		},
-		3
+		3,
+		val_fnc,
+		val_arg
 	);
 }
 	
@@ -465,7 +475,9 @@ static inline void tb_stg_wrt_lv2(
 	const u64 *trd,
 	const u8 *typ,
 	const f64 *prc,
-	const f64 *vol
+	const f64 *vol,
+	void (*val_fnc)(tb_stg_blk *blk, tb_stg_blk *prv, void *val_arg),
+	void *val_arg
 )
 {
 	assert(idx->lvl == 2);
@@ -480,7 +492,9 @@ static inline void tb_stg_wrt_lv2(
 			(const void *) prc,
 			(const void *) vol,
 		},
-		6
+		6,
+		val_fnc,
+		val_arg
 	);
 }
 

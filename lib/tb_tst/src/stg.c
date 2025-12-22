@@ -92,6 +92,18 @@ static inline void _get_dat(
 }
 
 /*
+ * Block validator.
+ */
+static void _blk_val(
+	tb_stg_blk *blk,
+	tb_stg_blk *prv,
+	void *arg
+)
+{
+	ns_atm(a64, inc_red, acq, arg);
+}	
+
+/*
  * Per-thread level-specific entrypoint.
  */
 static void _stg_exc_lvl(
@@ -114,8 +126,9 @@ static void _stg_exc_lvl(
 	assert(sys);
 	assert(idx);
 	
-	/* Reset the gate counter. */
+	/* Reset the sync data. */
 	dsc->syn->gat.ctr = 0;
+	dsc->syn->val_cnt = 0;
 
 	assert(lvl < 3);
 	const u8 lvl_to_arr_nb[3] = {
@@ -168,7 +181,7 @@ static void _stg_exc_lvl(
 		_get_dat(srcs, tims, dsc->dat, arr_nb, wrt_id, _elm_sizs);
 		tim_end = ((uint64_t *) srcs[0])[stp_elm_nb - 1];
 		if (dsc->wrt) {
-			tb_stg_wrt(idx, stp_elm_nb, srcs, arr_nb);
+			tb_stg_wrt(idx, stp_elm_nb, srcs, arr_nb, _blk_val, &dsc->syn->val_cnt);
 		}
 		wrt_id += stp_elm_nb;
 
@@ -183,8 +196,12 @@ static void _stg_exc_lvl(
 		}
 		GAT_PAS(dsc);
 
+		/* Everyone verifies that the validation counter is proper. */
+		const u64 itb_nb = tb_sgm_elm_nbr(idx->sgm);
+		const u64 val_cnt = ns_atm(a64, red, acq, &dsc->syn->val_cnt);
+		assert((val_cnt == itb_nb) || ((itb_nb && (val_cnt + 1 == itb_nb))));
+
 		/* Everyone verifies the index table. */
-		const u64 itb_nb = tb_sgm_elm_nb(idx->sgm);
 		/* previous line is syncing so all updates to itb should now be observed. */
 		const u64 itb_max = tb_sgm_elm_max(idx->sgm);
 		assert(itb_nb);

@@ -266,14 +266,14 @@ static inline void *tb_sgm_rgn(
 /*
  * Return @sgm's number of arrays.
  */
-static inline u8 tb_sgm_arr_nb(
+static inline u8 tb_sgm_arr_nbr(
 	tb_sgm *sgm
 ) {return sgm->dsc->arr_nb;}	
 
 /*
  * Return @sgm's number of elements.
  */
-static inline u64 tb_sgm_elm_nb(
+static inline u64 tb_sgm_elm_nbr(
 	tb_sgm *sgm
 ) {return ns_atm(a64, red, acq, &sgm->syn->elm_nb);}
 
@@ -292,7 +292,7 @@ static inline void *tb_sgm_arr_stt(
 	u8 idx
 )
 {
-	check(idx < tb_sgm_arr_nb(sgm));
+	check(idx < tb_sgm_arr_nbr(sgm));
 	return sgm->arrs[idx]; 
 }
 

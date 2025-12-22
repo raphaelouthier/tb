@@ -2,6 +2,38 @@
 
 #include <tb_cor/tb_cor.all.h>
 
+/**************
+ * Validation *
+ **************/
+
+/*
+ * If @blk is validated, return 0.
+ * If @blk is not validated, return 1.
+ */
+static inline uerr _val_get(
+	tb_stg_blk *blk
+) {return !!ns_atm(a64, red, acq, &blk->syn->scd_ini);}
+
+/*
+ * Attempt to acquire the ownership of @blk's validation.
+ * If success, return 0.
+ * If someone already acquired it, return 1.
+ */
+static inline uerr _val_ini(
+	tb_stg_blk *blk
+) {return !!ns_atm(a64, xch, aar, &blk->syn->scd_wip, 1);}
+
+/*
+ * Report @blk validated.
+ */
+static inline void _val_set(
+	tb_stg_blk *blk
+)
+{
+	assert(ns_atm(a64, red, acq, &blk->syn->scd_wip));
+	assert(!ns_atm(a64, xch, rel, &blk->syn->scd_ini, 1));
+}
+
 /*************************
  * Segments initializers *
  *************************/
@@ -44,132 +76,6 @@ static inline uad _ini_blk(
 }
 
 /*******************
- * Level constants *
- *******************/
-
-/*
- * Determine the index of the timestamp array
- * in the arrays of level @lvl.
- */
-static inline u8 _dat_tim_idx(
-	u8 lvl
-)
-{
-	/* Always at index 0. */
-	return 0;
-}
-
-/*
- * Determine the maximal number of elements
- * that an index table of level @lvl has.
- */
-static const uad _lvl_to_idx_max[3] = {
-	22000,
-	22000,
-	22000,
-};
-static inline u64 _idx_elm_max(
-	u8 tst,
-	u8 lvl
-)
-{
-	/* See design.md. */
-	assert(lvl < 3);
-	return tst ? 2000 : _lvl_to_idx_max[lvl];
-}
-
-/*
- * Determine the element sizeof elements that a block
- * of level @lvl should contain.
- */
-static const uad _lvl_to_blk_max[3] = {
-	(1 << 19),
-	(1 << 26),
-	(1 << 26),
-};
-static inline inline uad _blk_elm_max(
-	u8 tst,
-	u8 lvl
-)
-{
-	/* See design.md. */
-	assert(lvl < 3);
-	return tst ? 3 : _lvl_to_blk_max[lvl];
-}
-
-/*
- * Determine the number of regions that a block
- * of level @lvl should contain.
- */
-static const u8 _lvl_to_rgn_nb[3] = {
-	1, /* Syn. */
-	2, /* Syn + Orderbook state. */
-	2, /* Syn + Orderbook state. */
-};
-static inline inline u8 _blk_rgn_nb(
-	u8 lvl
-)
-{
-	/* See design.md. */
-	assert(lvl < 3);
-	return _lvl_to_rgn_nb[lvl];
-}
-
-/*
- * Determine the region sizes that a block
- * of level @lvl should contain.
- */
-static const u64 *const (_lvl_to_rgn_sizs[3]) = {
-	(u64 []) {TB_SGM_PAG_SIZ},
-	(u64 []) {TB_SGM_PAG_SIZ, TB_STG_RGN_SIZ_OBS},
-	(u64 []) {TB_SGM_PAG_SIZ, TB_STG_RGN_SIZ_OBS},
-};
-static inline const u64 *_blk_rgn_sizs(
-	u8 lvl
-)
-{
-	/* See design.md. */
-	assert(lvl < 3);
-	return _lvl_to_rgn_sizs[lvl];
-}
-
-/*
- * Determine the number of arrays that a block
- * of level @lvl should contain.
- */
-static const u8 _lvl_to_arr_nb[3] = {
-	5, /* time, bid, ask, vol, val. */
-	3, /* time, prc, vol. */
-	6, /* time, ord_id, trd_id, ord_typ, ord_val, ord_vol. */
-};
-static inline inline u8 _blk_arr_nb(
-	u8 lvl
-)
-{
-	/* See design.md. */
-	assert(lvl < 3);
-	return _lvl_to_arr_nb[lvl];
-}
-
-/*
- * Determine the maximal number of elements that a block
- * of level @lvl should contain.
- */
-static const u8 *const (_lvl_to_elm_sizs[3]) = {
-	(u8 []) {8, 8, 8, 8, 8},
-	(u8 []) {8, 8, 8},
-	(u8 []) {8, 8, 8, 1, 8, 8},
-};
-static inline const u8 *_blk_elm_sizs(
-	u8 lvl
-)
-{
-	/* See design.md. */
-	assert(lvl < 3);
-	return _lvl_to_elm_sizs[lvl];
-}
-
-/*******************
  * Data extraction *
  *******************/
 
@@ -198,7 +104,7 @@ static inline u64 _dat_tim(
 
 )
 {
-	const u8 tid = _dat_tim_idx(lvl);
+	const u8 tid = tb_lvl_tim_idx(lvl);
 	return ((const u64 *) srcs[tid])[idx];
 }
 
@@ -214,20 +120,20 @@ static inline u64 _dat_tim(
 /*
  * Return the size of the index table.
  */
-static inline u64 _itb_nb(
+static inline u64 _itb_nbr(
 	tb_stg_idx *idx
-) {return tb_sgm_elm_nb(idx->sgm);}
+) {return tb_sgm_elm_nbr(idx->sgm);}
 
 /*
  * Get the start time of a block.
  */
 static inline u64 _itb_blk_stt(
 	volatile u64 (*tbl)[2],
-	u64 blk_nb,
+	u64 blk_nbr,
 	u64 blk_idx
 )
 {
-	assert(blk_idx < blk_nb);
+	assert(blk_idx < blk_nbr);
 	return ns_atm(a64, red, acq, &tbl[blk_idx][0]);
 }
 
@@ -236,11 +142,11 @@ static inline u64 _itb_blk_stt(
  */
 static inline u64 _itb_blk_end(
 	volatile u64 (*tbl)[2],
-	u64 blk_nb,
+	u64 blk_nbr,
 	u64 blk_idx
 )
 {
-	assert(blk_idx < blk_nb);
+	assert(blk_idx < blk_nbr);
 	return ns_atm(a64, red, acq, &tbl[blk_idx][1]);
 }
 
@@ -249,12 +155,12 @@ static inline u64 _itb_blk_end(
  */
 static inline void _itb_blk_stt_set(
 	volatile u64 (*tbl)[2],
-	u64 blk_nb,
+	u64 blk_nbr,
 	u64 blk_idx,
 	u64 stt
 )
 {
-	assert(blk_idx < blk_nb);
+	assert(blk_idx < blk_nbr);
 	ns_atm(a64, wrt, rel, &tbl[blk_idx][0], stt);
 }
 
@@ -263,12 +169,12 @@ static inline void _itb_blk_stt_set(
  */
 static inline void _itb_blk_end_set(
 	volatile u64 (*tbl)[2],
-	u64 blk_nb,
+	u64 blk_nbr,
 	u64 blk_idx,
 	u64 end
 )
 {
-	assert(blk_idx < blk_nb);
+	assert(blk_idx < blk_nbr);
 	ns_atm(a64, wrt, rel, &tbl[blk_idx][1], end);
 }
 
@@ -288,33 +194,33 @@ static inline uerr _itb_sch(
 {
 	
 	/* Read the number of blocks. */
-	const u64 blk_nb = _itb_nb(idx);
+	const u64 blk_nbr = _itb_nbr(idx);
 	volatile u64 (*tbl)[2] = idx->tbl;
 
 	/* Verify the table. */
 #ifdef DEBUG
-	for (u64 i = 0; i + 1 < blk_nb; i++) {
-		check(_itb_blk_end(tbl, blk_nb, i) <= _itb_blk_stt(tbl, blk_nb, i + 1));
+	for (u64 i = 0; i + 1 < blk_nbr; i++) {
+		check(_itb_blk_end(tbl, blk_nbr, i) <= _itb_blk_stt(tbl, blk_nbr, i + 1));
 	}
 #endif
 
 	/* If outside boundaries, stop. */
 	if (
-		(blk_nb == 0) ||
-		(tim < _itb_blk_stt(tbl, blk_nb, 0)) ||
-		(tim > _itb_blk_end(tbl, blk_nb, blk_nb - 1))
+		(blk_nbr == 0) ||
+		(tim < _itb_blk_stt(tbl, blk_nbr, 0)) ||
+		(tim > _itb_blk_end(tbl, blk_nbr, blk_nbr - 1))
 	) return 1;
 
 	/* Bisect based on end time. */
 	u64 min = 0;
-	u64 max = blk_nb;
+	u64 max = blk_nbr;
 	while (min != max) {
 
 		/* Get mid IDX. */
 		const u64 mid = min + ((max - min) >> 1);
 
 		/* Bisect iter. */
-		if (tim > _itb_blk_end(tbl, blk_nb, mid)) min = mid + 1;
+		if (tim > _itb_blk_end(tbl, blk_nbr, mid)) min = mid + 1;
 		else max = mid;
 		assert(min <= max);
 
@@ -322,9 +228,9 @@ static inline uerr _itb_sch(
 
 	/* Verify that we found a valid block,
 	 * that spans @tim wrt its predecessor if any. */
-	assert(tim <= _itb_blk_end(tbl, blk_nb, min));
-	assert((_itb_blk_stt(tbl, blk_nb, min) <= tim) || (min > 0));
-	assert((min == 0) || (_itb_blk_end(tbl, blk_nb, min - 1) < tim));
+	assert(tim <= _itb_blk_end(tbl, blk_nbr, min));
+	assert((_itb_blk_stt(tbl, blk_nbr, min) <= tim) || (min > 0));
+	assert((min == 0) || (_itb_blk_end(tbl, blk_nbr, min - 1) < tim));
 
 	/* Complete. */
 	*blk_nbrp = min;
@@ -362,21 +268,20 @@ static inline tb_stg_blk *_blk_ctr_lod(
 
 	/* Generate the segment initializer. */
 	const uad imp_siz = _ini_blk(idx, blk_nbr);
-	const uad elm_max = _blk_elm_max(idx->sys->tst, idx->lvl);
-	const u8 rgn_nb = _blk_rgn_nb(idx->lvl);
-	const u64 *rgn_sizs = _blk_rgn_sizs(idx->lvl);
-	const u8 arr_nb = _blk_arr_nb(idx->lvl);
-	const u8 *elm_sizs = _blk_elm_sizs(idx->lvl);
-
+	const uad elm_max = tb_lvl_blk_len(idx->sys->tst, idx->lvl);
+	const u8 rgn_nbr = tb_lvl_rgn_nbr(idx->lvl);
+	const u64 *rgn_sizs = tb_lvl_rgn_sizs(idx->lvl);
+	const u8 arr_nbr = tb_lvl_arr_nbr(idx->lvl);
+	const u8 *elm_sizs = tb_lvl_arr_elm_sizs(idx->lvl);
 
 	/* Open the block segment, it should already exist. */
 	tb_sgm *sgm = tb_sgm_fopn(
 		ctr,
 		idx->sys->ini,
 		imp_siz,
-		rgn_nb,
+		rgn_nbr,
 		rgn_sizs,
-		arr_nb,
+		arr_nbr,
 		elm_max,
 		elm_sizs,
 		"%s/%s/%s/%u/%U", idx->sys->pth, idx->mkp, idx->ist, idx->lvl, blk_nbr
@@ -422,13 +327,13 @@ static inline tb_stg_blk *_blk_ctr(
 	assert(idx->key, "Index not writeable.\n");
 	
 	/* Determine the next block number. */
-	const u64 itb_max = _idx_elm_max(idx->sys->tst, idx->lvl); 
+	const u64 itb_max = tb_lvl_idx_siz(idx->sys->tst, idx->lvl); 
 	assert(itb_max == tb_sgm_elm_max(idx->sgm));
-	const u64 itb_nb = _itb_nb(idx); 
-	assert(itb_nb != itb_max, "index table full.\n");
+	const u64 itb_nbr = _itb_nbr(idx); 
+	assert(itb_nbr != itb_max, "index table full.\n");
 
 	/* Determine the block number. */
-	tb_stg_blk *blk = _blk_ctr_lod(1, idx, itb_nb);
+	tb_stg_blk *blk = _blk_ctr_lod(1, idx, itb_nbr);
 
 	/* Do not report the block yet in the index table,
 	 * as it has not data. */
@@ -474,8 +379,8 @@ static inline u64 _blk_stt(
 )
 {
 	volatile u64 (*tbl)[2] = blk->idx->tbl;
-	const u64 blk_nb = _itb_nb(blk->idx);
-	return _itb_blk_stt(tbl, blk_nb, _blk_nbr(blk));
+	const u64 blk_nbr = _itb_nbr(blk->idx);
+	return _itb_blk_stt(tbl, blk_nbr, _blk_nbr(blk));
 }
 
 /*
@@ -486,55 +391,54 @@ static inline u64 _blk_end(
 )
 {
 	volatile u64 (*tbl)[2] = blk->idx->tbl;
-	const u64 blk_nb = _itb_nb(blk->idx);
-	return _itb_blk_end(tbl, blk_nb, _blk_nbr(blk));
+	const u64 blk_nbr = _itb_nbr(blk->idx);
+	return _itb_blk_end(tbl, blk_nbr, _blk_nbr(blk));
 }
 
 /*
- * Write @wrt_nb elements into @blk's @arr_nb arrays
+ * Write @wrt_nbr elements into @blk's @arr_nbr arrays
  * from the locations specified in @srcs.  
  * Update @srcs with the refs of the next copy sources.
  */
 static inline u64 _blk_wrt(
 	tb_stg_idx *idx,
 	tb_stg_blk *blk,
-	u64 wrt_nb,
+	u64 wrt_nbr,
 	const void **srcs,
-	u8 arr_nb
+	u8 arr_nbr
 )
 {
 	assert(idx->key, "not a writeable index.\n");
-	check(arr_nb == _blk_arr_nb(idx->lvl));
+	check(arr_nbr == tb_lvl_arr_nbr(idx->lvl));
 
 	/* Cache the timestamp of the last values. */
-	const u64 tim_end = _dat_tim(idx->lvl, srcs, wrt_nb - 1);
+	const u64 tim_end = _dat_tim(idx->lvl, srcs, wrt_nbr - 1);
 
 	/* Cache dests. */
 	void *dst[6];
 	uad off = 0;
 	assert(!tb_sgm_wrt_get(blk->sgm, &off));
-	tb_sgm_wrt_loc(blk->sgm, wrt_nb, dst, arr_nb);
+	tb_sgm_wrt_loc(blk->sgm, wrt_nbr, dst, arr_nbr);
 
 	/* Get arrays sizes. */
-	const u8 *elm_sizs = _blk_elm_sizs(idx->lvl);
+	const u8 *elm_sizs = tb_lvl_arr_elm_sizs(idx->lvl);
 
 	/* Copy, update locations. */
-	for (u8 i = 0; i < arr_nb; i++) {
+	for (u8 i = 0; i < arr_nbr; i++) {
 		const void *src = srcs[i];
-		const u64 siz = elm_sizs[i] * wrt_nb;
+		const u64 siz = elm_sizs[i] * wrt_nbr;
 		ns_mem_cpy(dst[i], src, siz);
 		srcs[i] = ns_psum(src, siz);
 	}
 
 	/* Report the write. */
-	tb_sgm_wrt_don(blk->sgm, wrt_nb);
+	tb_sgm_wrt_don(blk->sgm, wrt_nbr);
 	tb_sgm_wrt_cpl(blk->sgm);
 
 	/* Return the end timestamp. */ 
 	return tim_end;
 
 }
-
 
 /*******************
  * Index internals *
@@ -595,7 +499,7 @@ static inline tb_stg_blk *_idx_lst(
 	assert(idx->key);
 
 	/* Get the block number. */
-	const u64 blk_nbr = _itb_nb(idx);
+	const u64 blk_nbr = _itb_nbr(idx);
 	if (!blk_nbr) return 0;
 
 	/* Load. */
@@ -641,6 +545,46 @@ static inline void _idx_cln(
 		_idx_dtr(sys, idx);
 	}
 }
+
+/********************
+ * Block validation *
+ ********************/
+
+/*
+ * Validate @blk.
+ * Complex cross-block op, requires the load / unload
+ * infrastructure.
+ */
+static inline void _blk_val(
+	tb_stg_idx *idx,
+	tb_stg_blk *blk,
+	void (*val_fnc)(tb_stg_blk *blk, tb_stg_blk *prv, void *arg),
+	void *val_arg
+)
+{
+
+	/* Checks. */
+	assert(tb_sgm_elm_max(blk->sgm) == tb_sgm_elm_nbr(blk->sgm));
+
+	/* Acquire validation. */
+	const uerr err = _val_ini(blk);
+	assert(!err, "Double validation.\n");
+
+	/* Get the previous block. */
+	const u64 blk_nbr = blk->blks.val;
+	tb_stg_blk *blk_prv = (blk_nbr) ? _blk_tak(_idx_lod_nbr(idx, blk_nbr - 1)) : 0;
+
+	/* Delegate to the handler. */
+	(*(val_fnc))(blk, blk_prv, val_arg);
+
+	/* Release the previous block. */
+	if (blk_prv) _blk_rel(blk_prv);
+
+	/* Report validation done. */
+	_val_set(blk);
+
+}
+
 
 /****************
  * System utils *
@@ -712,7 +656,7 @@ tb_stg_sys *tb_stg_ctr(
 	nh_all__(tb_stg_sys, sys);
 	sys->pth = nh_sall(pth);
 	ns_map_str_ini(&sys->idxs);
-	sys->itf_nb = 0;
+	sys->itf_nbr = 0;
 	sys->ini = nh_all(1024);
 	sys->tst = !!tst;
 	sys->sgm = 0;
@@ -749,7 +693,7 @@ void tb_stg_dtr(
 {
 
 	/* No user must be active. */
-	assert(!sys->itf_nb);
+	assert(!sys->itf_nbr);
 
 	/* Clean. */
 	_sys_cln(sys);
@@ -842,7 +786,7 @@ tb_stg_idx *tb_stg_opn(
 
 	/* Generate the segment initializer. */
 	uad imp_siz = _ini_idx(sys, mkp, ist, lvl);
-	uad elm_max = _idx_elm_max(sys->tst, lvl);
+	uad elm_max = tb_lvl_idx_siz(sys->tst, lvl);
 
 	/* Open the index segment. */
 	tb_sgm *sgm = tb_sgm_fopn(
@@ -882,7 +826,7 @@ tb_stg_idx *tb_stg_opn(
 	end:;
 
 	/* Track one more use. */	
-	SAFE_INCR(sys->itf_nb);
+	SAFE_INCR(sys->itf_nbr);
 
 	/* Attempt to acquire write privileges if required.
 	 * Bail out if failure. */
@@ -924,7 +868,7 @@ void tb_stg_cls(
 
 	/* Unuse. */
 	SAFE_DECR(idx->uctr);
-	SAFE_DECR(idx->sys->itf_nb);
+	SAFE_DECR(idx->sys->itf_nbr);
 	if (!idx->uctr) {
 		assert(!idx->key);
 	}
@@ -969,22 +913,26 @@ uerr tb_stg_sch(
 
 /*
  * Iteration next.
+ * Unload @blk if specified.
  */
 tb_stg_blk *tb_stg_red_nxt(
 	tb_stg_idx *idx,
 	tb_stg_blk *blk,
-	u64 end
+	u64 end,
+	u8 unl_blk
 )
 {
 
 	/* Release. */
 	assert(blk);
 	const u64 blk_nbr = blk->blks.val;
-	_blk_rel(blk);
+	if (unl_blk) {
+		_blk_rel(blk);
+	}
 
 	/* Read the index table.
 	 * If next block is after end time, nothing to do. */
-	const u64 itb_nbr = _itb_nb(idx);
+	const u64 itb_nbr = _itb_nbr(idx);
 	check(blk_nbr < itb_nbr);
 	const u64 nxt_nbr = blk_nbr + 1;
 	if (((nxt_nbr) == itb_nbr) || (end < _itb_blk_end(idx->tbl, itb_nbr, nxt_nbr))) {
@@ -997,56 +945,27 @@ tb_stg_blk *tb_stg_red_nxt(
 }
 
 /*
- * If @blk is validated, return 0.
- * If @blk is not validated, return 1.
- */
-uerr tb_stg_val_get(
-	tb_stg_blk *blk
-) {return !!ns_atm(a64, red, acq, &blk->syn->scd_ini);}
-
-/*
- * Attempt to acquire the ownership of @blk's validation.
- * If success, return 0.
- * If someone already acquired it, return 1.
- */
-uerr tb_stg_val_ini(
-	tb_stg_blk *blk
-) {return !!ns_atm(a64, xch, aar, &blk->syn->scd_wip, 1);}
-
-/*
- * Report @blk validated.
- */
-void tb_stg_val_set(
-	tb_stg_blk *blk
-)
-{
-	assert(ns_atm(a64, red, acq, &blk->syn->scd_wip));
-	assert(!ns_atm(a64, red, acq, &blk->syn->scd_ini));
-	ns_atm(a64, wrt, rel, &blk->syn->scd_wip, 1);
-}
-
-/*
  * Initialize @dsts with @blk's arrays, set *@sizsp with
  * the array containing its element sizes, return its
  * number of elements.
  */
-u64 tb_sgm_arr_(
+u64 tb_blk_arr(
 	tb_stg_blk *blk,
 	const void **dsts,
-	u8 dst_nb,
+	u8 dst_nbr,
 	const u8 **sizsp
 )
 {
-	const u64 nb = tb_sgm_elm_nb(blk->sgm);
-	assert(dst_nb == tb_sgm_arr_nb(blk->sgm));
-	assert(dst_nb == _blk_arr_nb(blk->idx->lvl));
-	*sizsp = _blk_elm_sizs(blk->idx->lvl);
+	const u64 nb = tb_sgm_elm_nbr(blk->sgm);
+	assert(dst_nbr == tb_sgm_arr_nbr(blk->sgm));
+	assert(dst_nbr == tb_lvl_arr_nbr(blk->idx->lvl));
+	*sizsp = tb_lvl_arr_elm_sizs(blk->idx->lvl);
 	tb_sgm_red_rng(
 		blk->sgm, 	
 		0,
 		nb,
 		dsts,
-		dst_nb
+		dst_nbr
 	);
 	return nb;
 }
@@ -1072,16 +991,18 @@ void tb_stg_wrt(
 	tb_stg_idx *idx,
 	u64 nb,
 	const void **srcs,
-	u8 arr_nb
+	u8 arr_nbr,
+	void (*val_fnc)(tb_stg_blk *blk, tb_stg_blk *prv, void *val_arg),
+	void *val_arg
 )
 {
 	assert(idx->key, "not a writeable index.\n");
 
 	/* Fetch the index table. */
-	const u64 itb_max = _idx_elm_max(idx->sys->tst, idx->lvl);
+	const u64 itb_max = tb_lvl_idx_siz(idx->sys->tst, idx->lvl);
 	assert(itb_max == tb_sgm_elm_max(idx->sgm));
-	u64 itb_nb = _itb_nb(idx);
-	assert(itb_nb <= itb_max);
+	u64 itb_nbr = _itb_nbr(idx);
+	assert(itb_nbr <= itb_max);
 	volatile u64 (*tbl)[2] = idx->tbl;
 
 	/* Determine the last block. */
@@ -1102,7 +1023,7 @@ void tb_stg_wrt(
 
 		/* Determine the number of writeable elements. */
 		const uad blk_max = tb_sgm_elm_max(blk->sgm);
-		const uad blk_stt = tb_sgm_elm_nb(blk->sgm);
+		const uad blk_stt = tb_sgm_elm_nbr(blk->sgm);
 		assert(blk_stt <= blk_max);
 		const uad blk_avl = blk_max - blk_stt;
 		
@@ -1115,16 +1036,17 @@ void tb_stg_wrt(
 		}
 
 		/* Determine the write size. */
-		const u64 wrt_nb = (nb < blk_avl) ? nb : blk_avl;
+		const u8 wrt_ful = (nb >= blk_avl);
+		const u64 wrt_nbr = (wrt_ful) ? blk_avl : nb;
 
 		/* Perform the write, update locations, return
 		 * the time of the last element. */
 		const u64 end = prv_end = _blk_wrt(
 			idx,
 			blk,
-			wrt_nb,
+			wrt_nbr,
 			srcs,
-			arr_nb
+			arr_nbr
 		);
 		assert(stt <= end);
 
@@ -1133,27 +1055,32 @@ void tb_stg_wrt(
 		if (crt) {
 
 			/* Reference a new block in the index table. */
-			_itb_blk_stt_set(tbl, itb_nb + 1, itb_nb, stt);
+			_itb_blk_stt_set(tbl, itb_nbr + 1, itb_nbr, stt);
 
 			/* Report a new element in the index table. */
 			const uad itb_nxt = tb_sgm_wrt_don(idx->sgm, 1);
-			assert(itb_nxt == itb_nb + 1);
-			itb_nb = itb_nxt; 
-			assert(itb_nb == _itb_nb(idx));
+			assert(itb_nxt == itb_nbr + 1);
+			itb_nbr = itb_nxt; 
+			assert(itb_nbr == _itb_nbr(idx));
 
 		}
 
 		/* Report the block's end in the index table. */ 
-		_itb_blk_end_set(tbl, itb_nb, itb_nb - 1, end);
+		_itb_blk_end_set(tbl, itb_nbr, itb_nbr - 1, end);
 
 		/* Report write. */
-		SAFE_SUB(nb, wrt_nb);
+		SAFE_SUB(nb, wrt_nbr);
+
+		/* If block has been fully written, validate it. */
+		if (blk_avl == wrt_nbr) {
+			_blk_val(idx, blk, val_fnc, val_arg);
+		}
 
 		/* Reiterate. */ 
 		blk = 0;
 	}
 
-	assert(itb_nb == _itb_nb(idx));
+	assert(itb_nbr == _itb_nbr(idx));
 
 }
 

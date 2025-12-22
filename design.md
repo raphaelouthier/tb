@@ -220,3 +220,32 @@ structured as follows :
 
 Levels 1 2 3 (as described in the design doc) are
 supported. Level 0 may be supported in the future.
+
+## Agent
+
+The agent is the entity that makes decisions. 
+
+High level objectives :
+- read market data through the provider.
+- process them.
+- buy or sell assets based on this.
+
+Design choices :
+- event based rather than time based.
+  - handles data read and heatmap reconstruction for strategies.
+- must allow backtesting.
+- must allow real time trading.
+- must allow abstract strategies.
+  - some may require GPU intervention so must expose prediction entrypoints.
+- must not be fault tolerant :
+  - any crash requires manual external intervention to liquidate all assets.
+  - no need for a file system backing.
+- exposes high level agent functions, does not call the routines directly.
+  - monitor handles start, stop, loops, and server requests.
+
+
+
+
+
+
+

@@ -25,6 +25,9 @@ struct tb_tst_stg_syn {
 	/* Gate. */
 	ns_gat gat;
 
+	/* Validation counter. */
+	a64 val_cnt;
+
 };
 
 /*
