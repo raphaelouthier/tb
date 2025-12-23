@@ -298,7 +298,7 @@ void tb_lv1_prp(
 );
 
 /*
- * Add @upd_nb volume updates to @hst.
+ * Add @upd_nbr volume updates to @hst.
  * If @tims is null, volumes are considered to be
  * start volumes only and are not registered as updates,
  * and in this case, all tick levels must be new. 
@@ -312,7 +312,7 @@ void tb_lv1_prp(
  */
 void tb_lv1_add(
 	tb_lv1_hst *hst,
-	u64 upd_nb,
+	u64 upd_nbr,
 	u64 *tims,
 	u64 *tcks,
 	f64 *vols

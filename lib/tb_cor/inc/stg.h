@@ -201,8 +201,8 @@ void tb_stg_cls(
 
 /*
  * If @idx has no block covering @tim, return 0.
- * If @idx has a block covering @tim, load it in memory,
- * and return it.
+ * If @idx has a block covering @tim, load the first
+ * one in memory and return it.
  */
 _own_ tb_stg_blk *tb_stg_lod_tim(
 	tb_stg_idx *idx,
@@ -275,7 +275,6 @@ static inline void tb_stg_shf(
 		dsts[arr_idx] = srcs[arr_idx] + sizs[arr_idx] * shf;
 	}
 }
-	
 
 /*
  * Same as above but initialize @dsts and the return
@@ -342,6 +341,17 @@ static inline tb_stg_blk *tb_stg_red_fst(
 }
 
 /*
+ * If it exists, load and return the predecessor of
+ * @blk.
+ * If not, return 0.
+ * Do not unload @blk.
+ */
+tb_stg_blk *tb_stg_red_prv(
+	tb_stg_idx *idx,
+	tb_stg_blk *blk
+);
+
+/*
  * Iteration next.
  * Unload @blk if specified.
  */
@@ -403,109 +413,5 @@ void tb_stg_wrt(
 	void (*val_fnc)(tb_stg_blk *blk, tb_stg_blk *prv, void *val_arg),
 	void *val_arg
 );
-
-/*
- * Level 0 data write.
- */
-static inline void tb_stg_wrt_lv0(
-	tb_stg_idx *idx,
-	u64 nb,
-	const u64 *tim,
-	const f64 *bid,
-	const f64 *ask,
-	const f64 *avg,
-	const f64 *vol,
-	void (*val_fnc)(tb_stg_blk *blk, tb_stg_blk *prv, void *val_arg),
-	void *val_arg
-)
-{
-	assert(idx->lvl == 0);
-	tb_stg_wrt(
-		idx,
-		nb,
-		(const void *[]) {
-			(const void *) tim,
-			(const void *) bid,
-			(const void *) ask,
-			(const void *) avg,
-			(const void *) vol,
-		},
-		5,
-		val_fnc,
-		val_arg
-	);
-}
-
-/*
- * Level 1 data validation.
- */
-void tb_stg_val_lv1(
-	tb_stg_blk *blk,
-	tb_stg_blk *prv,
-	void *arg
-);
-
-/*
- * Level 1 data write.
- * Receives a giga orderbook snapshot to compute the
- * new block's orderbook snapshot.
- */
-static inline void tb_stg_wrt_lv1(
-	tb_stg_idx *idx,
-	u64 nb,
-	const u64 *tim,
-	const f64 *prc,
-	const f64 *vol,
-	f64 *gos
-)
-{
-	assert(idx->lvl == 1);
-	tb_stg_wrt(
-		idx,
-		nb,
-		(const void *[]) {
-			(const void *) tim,
-			(const void *) prc,
-			(const void *) vol,
-		},
-		3,
-		&tb_stg_val_lv1,
-		(void *) gos
-	);
-}
-	
-/*
- * Level 2 data write.
- */
-static inline void tb_stg_wrt_lv2(
-	tb_stg_idx *idx,
-	u64 nb,
-	const u64 *tim,
-	const u64 *ord,
-	const u64 *trd,
-	const u8 *typ,
-	const f64 *prc,
-	const f64 *vol,
-	void (*val_fnc)(tb_stg_blk *blk, tb_stg_blk *prv, void *val_arg),
-	void *val_arg
-)
-{
-	assert(idx->lvl == 2);
-	tb_stg_wrt(
-		idx,
-		nb,
-		(const void *[]) {
-			(const void *) tim,
-			(const void *) ord,
-			(const void *) trd,
-			(const void *) typ,
-			(const void *) prc,
-			(const void *) vol,
-		},
-		6,
-		val_fnc,
-		val_arg
-	);
-}
 
 #endif /* TB_COR_STG_H */

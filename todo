@@ -1,6 +1,9 @@
 
 TODO IO lib / io part of lvl API that sits on top of STG. 
 
+TODO update the lv1 unit tests to also test without bid-ask curves.
+	idea : use two histories instead of one, which allows memcmp-ing the heatmaps and internal states.
+
 TODO unit test for the provider.
 
 TODO agent infrastructure.
