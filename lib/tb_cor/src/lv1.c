@@ -1035,9 +1035,9 @@ void tb_lv1_prp(
 void tb_lv1_add(
 	tb_lv1_hst *hst,
 	u64 upd_nb,
-	u64 *tims,
-	u64 *tcks,
-	f64 *vols
+	const u64 *tims,
+	const u64 *tcks,
+	const f64 *vols
 )
 {
 	assert(upd_nb);

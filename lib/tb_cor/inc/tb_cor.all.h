@@ -20,5 +20,6 @@
 #include <tb_cor/lv1.h>
 #include <tb_cor/obk.h>
 #include <tb_cor/bkr.h>
+#include <tb_cor/iox.h>
 
 #endif /* TB_COR_ALL_H */

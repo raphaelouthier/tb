@@ -12,7 +12,7 @@
  * Otherwise, return 0.
  */
 static inline u64 _lv1_blk_red(
-	tb_rd1 *rd1,
+	tb_dr1 *dr1,
 	const u64 tim_cur,
 	const void **dsts,
 	u8 dsts_nbr,
@@ -20,7 +20,7 @@ static inline u64 _lv1_blk_red(
 	u8 *endp
 )
 {
-	assert(dsts_nbr == rd1->dat_nbr);
+	assert(dsts_nbr == dr1->dat_nbr);
 	assert(tim_cur != 0);
 	assert(tim_cur != (u64) -1);
 
@@ -30,10 +30,10 @@ static inline u64 _lv1_blk_red(
 
 	/* First, update the block if required.
 	 * If none, fail. */
-	if (rd1->elm_idx == rd1->elm_max) {
+	if (dr1->elm_idx == dr1->elm_max) {
 
 		/* Query next, do nothing if none. */
-		tb_stg_blk *blk = tb_stg_red_nxt(rd1->idx, rd1->blk, (u64) -1, 0);
+		tb_stg_blk *blk = tb_stg_red_nxt(dr1->idx, dr1->blk, (u64) -1, 0);
 		if (!blk) {
 			don = 1;
 			end = 1;
@@ -41,27 +41,27 @@ static inline u64 _lv1_blk_red(
 		}
 
 		/* Unload previous. */
-		tb_stg_unl(rd1->blk);
-		rd1->blk = blk;
+		tb_stg_unl(dr1->blk);
+		dr1->blk = blk;
 
 		/* Update metadata. */
-		rd1->elm_nbr = tb_blk_arr(blk, rd1->dats, dsts_nbr, &rd1->sizs);
-		rd1->elm_max = tb_stg_blk_max(rd1->blk);
-		rd1->elm_idx = 0;
-		rd1->blk_end = ((u64 *) rd1->dats[0])[rd1->elm_nbr - 1];
+		dr1->elm_nbr = tb_blk_arr(blk, dr1->dats, dsts_nbr, &dr1->sizs);
+		dr1->elm_max = tb_stg_blk_max(dr1->blk);
+		dr1->elm_idx = 0;
+		dr1->blk_end = ((u64 *) dr1->dats[0])[dr1->elm_nbr - 1];
 
 	}
 
 	/* If no time limit, or if time limit is after the
 	 * current block's end, provide as much data as possible.
 	 * If time limit within the current block, find the max index. */
-	assert(rd1->elm_idx < rd1->elm_nbr);
-	const u64 elm_nbr = rd1->elm_nbr = tb_stg_elm_nbr(rd1->blk);
-	const u64 shf = rd1->elm_idx;
-	u64 nbr = rd1->elm_nbr - shf; 
-	if (tim_cur <= rd1->blk_end) {
+	assert(dr1->elm_idx < dr1->elm_nbr);
+	const u64 elm_nbr = dr1->elm_nbr = tb_stg_elm_nbr(dr1->blk);
+	const u64 shf = dr1->elm_idx;
+	u64 nbr = dr1->elm_nbr - shf; 
+	if (tim_cur <= dr1->blk_end) {
 		don = 1;
-		const u64 max = rd1->elm_idx = tb_stg_elm_sch((u64 *) rd1->dats[0], elm_nbr, 0, tim_cur); 
+		const u64 max = dr1->elm_idx = tb_stg_elm_sch((u64 *) dr1->dats[0], elm_nbr, 0, tim_cur); 
 		assert(max < elm_nbr);
 		assert(shf < max);
 		nbr = max - shf;
@@ -69,15 +69,16 @@ static inline u64 _lv1_blk_red(
 	
 	/* If current block is not full, the end of
 	 * the stream is reached. */
-	else if (elm_nbr != rd1->elm_max) {
+	else if (elm_nbr != dr1->elm_max) {
 		don = 1;
 		end = 1;
 	}
 
 	/* Provide data. */
+	end:;
 	*donp = don;
 	*endp = end;
-	tb_stg_shf(dsts, rd1->dats, rd1->sizs, dsts_nbr, shf);
+	tb_stg_shf(dsts, dr1->dats, dr1->sizs, dsts_nbr, shf);
 	return nbr;
 
 }
@@ -155,7 +156,7 @@ static inline tb_stg_blk *_add_obs(
  * Add all updates from @blk's start (containing @tim_stt)
  * until @tim_cur (<) to @dr1's history.
  */
-static inline tb_stg_blk *_add_upds(
+static inline void _add_upds(
 	tb_dr1 *dr1,
 	tb_stg_blk *blk,
 	u64 tim_stt,
@@ -163,6 +164,8 @@ static inline tb_stg_blk *_add_upds(
 	u8 end_ok
 )
 {
+	/* Get the number of arrays. */
+	const u8 dat_nbr = 3;
 
 	/* Initialize the read environment to read starting
 	 * at @blk's first element. */
@@ -197,7 +200,6 @@ tb_dr1 *tb_dr1_ctr(
 	tb_stg_sys *sys,
 	const char *mkp,
 	const char *ist,
-	u8 lvl,
 	u64 tim_res,
 	u64 hmp_dim_tck,
 	u64 hmp_dim_tim,
@@ -206,19 +208,13 @@ tb_dr1 *tb_dr1_ctr(
 )
 {
 
-	/* Get the number of arrays. */
-	const u8 dat_nbr = tb_lvl_arr_nbr(lvl);
-	assert(dat_nbr <= TB_ANB_MAX);
-
 	/* Construct, open the index, get the block
 	 * covering @tim. */
-	assert(lvl < 3);
 	nh_all__(tb_dr1, dr1);
 	tb_str_cpy(dr1->mkp, mkp);
 	tb_str_cpy(dr1->ist, ist);
-	dr1->lvl = lvl;
 	dr1->stg = sys;
-	dr1->idx = assert(tb_stg_opn(dr1->stg, mkp, ist, lvl, 0, 0));
+	dr1->idx = assert(tb_stg_opn(dr1->stg, mkp, ist, 1, 0, 0));
 
 	/* Construct a level 1 reconstructor. */
 	dr1->hst = tb_lv1_ctr(
@@ -235,7 +231,7 @@ tb_dr1 *tb_dr1_ctr(
 	const u64 hmp_len = hmp_dim_tck * tim_res;
 	assert(hmp_len / tim_res == hmp_dim_tck);
 	assert(tim_cur > hmp_len);
-	const u64 hmp_stt = tim_cur - hmp_len;
+	const u64 tim_stt = tim_cur - hmp_len;
 
 	/* Add the first block's orderbook snapshot. */
 	tb_stg_blk *blk = assert(_add_obs(dr1, tim_stt));
@@ -256,9 +252,9 @@ void tb_dr1_dtr(
 )
 {
 	tb_lv1_dtr(dr1->hst);
-	tb_stg_unl(rd1->blk);
-	tb_stg_cls(rd1->idx, 0);
-	nh_fre_(rd1);
+	tb_stg_unl(dr1->blk);
+	tb_stg_cls(dr1->idx, 0);
+	nh_fre_(dr1);
 }
 
 /*
@@ -276,22 +272,21 @@ void tb_dr1_add(
 {
 
 	/* Ensure monotonicity. */
-	assert(rd1->tim_lst <= tim_cur);
-	rd1->tim_lst = tim_cur;
+	assert(dr1->tim_lst <= tim_cur);
+	dr1->tim_lst = tim_cur;
 
 	/* Prepare until @tim_cur. */
-	tb_lv1_prp(rd1->hst);
-
+	tb_lv1_prp(dr1->hst, tim_cur);
 	
 	/* Read iteratively. */
 	u8 don = 0;
 	u8 end = 0;
-	void *dsts[3];
+	const void *dsts[3];
 	while (!don) {
 
 		/* Read. */
 		const u64 upd_nbr = _lv1_blk_red(
-			rd1,
+			dr1,
 			tim_cur,
 			dsts,
 			3,
@@ -306,7 +301,7 @@ void tb_dr1_add(
 
 		/* Add. */
 		tb_lv1_add(
-			rd1->hst,
+			dr1->hst,
 			upd_nbr,
 			dsts[0],
 			dsts[1],
@@ -316,7 +311,7 @@ void tb_dr1_add(
 	}
 
 	/* Process all updates. */
-	tb_lv1_prc(rd1->hst);
+	tb_lv1_prc(dr1->hst);
 
 }
 

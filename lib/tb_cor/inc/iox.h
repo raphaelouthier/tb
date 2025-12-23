@@ -17,7 +17,7 @@
  *********/
 
 types(
-	tb_rd1
+	tb_dr1
 );
 
 /**************
@@ -35,20 +35,14 @@ struct tb_dr1 {
 	/* Instrument. */
 	tb_str ist;
 
-	/* Data level. */
-	u8 lvl;
-
 	/* Storage. */
 	tb_stg_sys *stg;
 
 	/* Index. */
 	tb_stg_idx *idx;
 
-	/* Current block. */
-	tb_stg_blk *blk;
-
 	/* Current block. Never null. */
-	void *blk;
+	tb_stg_blk *blk;
 
 	/* Index in @blk where @dats point to. */
 	u64 elm_idx;
@@ -94,7 +88,6 @@ tb_dr1 *tb_dr1_ctr(
 	tb_stg_sys *sys,
 	const char *mkp,
 	const char *ist,
-	u8 lvl,
 	u64 tim_res,
 	u64 hmp_dim_tck,
 	u64 hmp_dim_tim,
@@ -126,7 +119,7 @@ void tb_dr1_add(
  * Delete all updates that are too old to appear
  * in the heatmap anymore.
  */
-static inline void tb_lv1_cln(
+static inline void tb_dr1_cln(
 	tb_dr1 *dr1
 ) {return tb_lv1_cln(dr1->hst);}
 
@@ -135,7 +128,7 @@ static inline void tb_lv1_cln(
  */
 static inline f64 *tb_dr1_hmp(
 	tb_dr1 *dr1
-) {return tb_lv1_hst_hmp(dr1->hst);}
+) {return tb_lv1_hmp(dr1->hst);}
 
 /*
  * If @dr1 supports it, return its bid curve.
@@ -143,7 +136,7 @@ static inline f64 *tb_dr1_hmp(
  */
 static inline u64 *tb_dr1_bid(
 	tb_dr1 *dr1
-) {return tb_lv1_hst_bid(dr1->hst);}
+) {return tb_lv1_bid(dr1->hst);}
 
 /*
  * If @dr1 supports it, return its ask curve.
@@ -151,7 +144,7 @@ static inline u64 *tb_dr1_bid(
  */
 static inline u64 *tb_dr1_ask(
 	tb_dr1 *dr1
-) {return tb_lv1_hst_bid(dr1->hst);}
+) {return tb_lv1_bid(dr1->hst);}
 
 /*************
  * Write API *

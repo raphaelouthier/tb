@@ -912,6 +912,28 @@ uerr tb_stg_sch(
 ) {return _itb_sch(idx, tim, blk_nbrp);}
 
 /*
+ * If it exists, load and return the predecessor of
+ * @blk.
+ * If not, return 0.
+ * Do not unload @blk.
+ */
+tb_stg_blk *tb_stg_red_prv(
+	tb_stg_idx *idx,
+	tb_stg_blk *blk
+)
+{
+
+	/* Get the previous block index. */
+	assert(blk);
+	const u64 blk_nbr = blk->blks.val;
+	if (!blk_nbr) return 0;
+
+	/* If previous block exists, load it. */
+	return _blk_tak(_idx_lod_nbr(idx, blk_nbr - 1));
+	
+}
+
+/*
  * Iteration next.
  * Unload @blk if specified.
  */
