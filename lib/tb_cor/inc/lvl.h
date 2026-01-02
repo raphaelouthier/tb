@@ -213,21 +213,4 @@ static inline const u8 *tb_lvl_arr_elm_sizs(
 	return tb_lvl_to_arr_elm_sizs[lvl];
 }
 
-/**********************
- * Orderbook snapshot *
- **********************/
-
-/*
- * From the orderbook snapshot at T0, located at @src,
- * and the updates between T0 and T1, generate the
- * orderbook snapshot for T1 at @dst.
- */
-void tb_lvl_obs_gen(
-	void *dst,
-	void *src,
-	u64 *tims,
-	u64 *vals,
-	f64 *vols
-);
-
 #endif /* TB_LVL_H */

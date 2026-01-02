@@ -48,11 +48,8 @@ static inline u64 tb_obs_set(
  * and the updates between T0 and T1, generate the
  * orderbook snapshot for T1 at @dst.
  * Use the giga orderbook snapshot at @gos.
- * Return 1 if there was a data loss during
- * the transfer from @gos to @dst.
- * Return 0 if all data did fit in @dst.
  */
-uerr tb_obk_gen(
+void tb_obs_gen(
 	void *dst,
 	const void *src,
 	f64 *gos,

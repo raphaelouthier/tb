@@ -9,6 +9,8 @@
 #include <tb_tst/utl.h>
 #include <tb_tst/sgm.h>
 #include <tb_tst/stg.h>
+#include <tb_tst/obk.h>
+#include <tb_tst/lvl.h>
 #include <tb_tst/lv1.h>
 #include <tb_tst/lv1_gens.h>
 #include <tb_tst/lv1_vrf.h>

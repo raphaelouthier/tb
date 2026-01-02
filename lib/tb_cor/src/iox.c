@@ -345,7 +345,7 @@ static void _val_lv1(
 	const u64 upd_nbr = tb_blk_arr(blk, arrs, 3, &sizs); 
 
 	/* Generate the new snapshot. */
-	tb_obk_gen(
+	tb_obs_gen(
 		dst, src,
 		gos, 
 		upd_nbr,

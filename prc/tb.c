@@ -38,13 +38,17 @@ static u32 _mux_one(
 		(0, flg, rpr, (rpr), "run reproduction tests."),
 		(0, flg, sgm, (sgm), "run segment tests."),
 		(0, flg, stg, (stg), "run storage tests."),
-		(0, flg, lv1, (lv1), "run storage tests.")
+		(0, flg, obk, (obk), "run orderbook computation tests."),
+		(0, flg, lvl, (lvl), "run level constants check tests."),
+		(0, flg, lv1, (lv1), "run level 1 reconstruction tests.")
 	);
 	u32 tst_cnt = 0;
 	nh_tst_sys *sys = nh_tst_sys_ctr();
 	if (rpr__flg) tst(rpr); 
 	if (sgm__flg) tst(sgm, thr_nb, prc); 
 	if (stg__flg) tst(stg, thr_nb, prc); 
+	if (obk__flg) tst(obk, thr_nb, prc); 
+	if (lvl__flg) tst(lvl, thr_nb, prc); 
 	if (lv1__flg) tst(lv1, thr_nb, prc); 
 	assert(nh_tst_don(sys));
 	debug("tb tests : %u testbenches ran, %U sequences, %U unit tests, %U errors.\n", tst_cnt, sys->seq_cnt, sys->unt_cnt, sys->err_cnt);
@@ -69,6 +73,8 @@ static u32 _mux_all(
 	tst(rpr);
 	tst(sgm, thr_nb, prc);
 	tst(stg, thr_nb, prc);
+	tst(obk, thr_nb, prc);
+	tst(lvl, thr_nb, prc);
 	tst(lv1, thr_nb, prc);
 	assert(nh_tst_don(sys));
 	debug("tb tests : %u testbenches ran, %U sequences, %U unit tests, %U errors.\n", tst_cnt, sys->seq_cnt, sys->unt_cnt, sys->err_cnt);

@@ -11,11 +11,8 @@
  * and the updates between T0 and T1, generate the
  * orderbook snapshot for T1 at @dst.
  * Use the giga orderbook snapshot at @gos.
- * Return 1 if there was a data loss during
- * the transfer from @gos to @dst.
- * Return 0 if all data did fit in @dst.
  */
-uerr tb_obk_gen(
+void tb_obs_gen(
 	void *dst,
 	const void *src,
 	f64 *gos,
@@ -131,14 +128,6 @@ uerr tb_obk_gen(
 		gos_stt,
 		TB_LVL_GOS_NB
 	));
-
-	/* Report loss if the bid ask range does not fit
-	 * in @dst. */
-	const u64 bar_stt = (wst_bid < bst_ask) ? wst_bid : bst_ask;
-	const u64 bar_end = (bst_bid < wst_ask) ? wst_ask : bst_bid;
-	check(bar_stt <= bar_end);
-	check(dst_stt < dst_end);
-	return (bar_stt < dst_stt) || (dst_end < bar_end);
 
 }
 

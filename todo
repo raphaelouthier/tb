@@ -1,16 +1,17 @@
+TODO UNIT TESTS TO VERIFY DATA IN LVL.c
+
+TODO OBK unit tests.
+
+TODO TB_LVL_OBS_GEN unit test.
+
+TODO unit test for the provider.
 
 TODO update the lv1 unit tests to also test without bid-ask curves.
 	idea : use two histories instead of one, which allows memcmp-ing the heatmaps and internal states.
 
-TODO unit test for the provider.
-
 TODO agent infrastructure.
 
 TODO unit tests for the agent.
-
-TODO UNIT TESTS TO VERIFY DATA IN LVL.c
-
-TODO OBK unit tests.
 
 #######
 # LV1 #
