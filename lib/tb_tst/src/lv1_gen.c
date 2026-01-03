@@ -107,14 +107,14 @@ static inline void _bac_upd(
 	u64 bst_ask = (u64) -1;
 	
 	/* Determine the best bid and best ask. */
-	tb_obk_bst_bat(
+	assert(!tb_obk_bst_bat(
 		obk_cur,
 		ctx->tck_nbr,
 		0, ctx->tck_nbr,
 		ctx->tck_min,
 		&bst_bid, &bst_ask,
 		0, 0
-	);
+	));
 	assert(bst_bid < bst_ask);
 
 	/* Incorporate the best bid and best ask. */

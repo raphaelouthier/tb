@@ -28,7 +28,7 @@ void tb_obs_gen(
 	ns_mem_rst(gos, sizeof(f64) * TB_LVL_GOS_NB); 
 
 	/* Determine the mid price of @src. */
-	const u64 src_mid = (src) ? tb_obs_mid(src) : 0;
+	const u64 src_mid = (src) ? tb_obs_mid(src) : (TB_LVL_OBS_NB >> 1);
 	assert(src_mid >= (TB_LVL_OBS_NB >> 1));
 
 	/* Determine the range of @src. */
@@ -85,23 +85,30 @@ void tb_obs_gen(
 	/* Determine the best range to query best bids and asks. */
 	const u64 bac_stt = ((!src) || (upd_min < src_stt)) ? upd_min : src_stt;
 	const u64 bac_end = ((!src) || (src_end < upd_max)) ? upd_max : src_end;
+	check(bac_stt >= gos_stt);
+	check(bac_end >= gos_stt);
+	check(bac_stt < gos_stt + TB_LVL_GOS_NB);
+	check(bac_end < gos_stt + TB_LVL_GOS_NB);
 
 	/* Compute the best bid and ask. */ 
 	u64 bst_bid = 0;
 	u64 bst_ask = (u64) -1;
 	u64 wst_bid = 0;
 	u64 wst_ask = (u64) -1;
-	tb_obk_bst_bat(
+	const uerr err = tb_obk_bst_bat(
 		gos,
 		TB_LVL_GOS_NB,
-		bac_stt,
-		bac_end,
-		0,
+		bac_stt - gos_stt,
+		bac_end - gos_stt + 1,
+		gos_stt,
 		&bst_bid,
 		&bst_ask,
 		&wst_bid,
 		&wst_ask
 	);
+	if (err) {
+		debug("detected an inverted bid/ask during obs computation.\n"); 
+	}
 
 	/* Determine the ideal anchor price. */
 	const u64 anc = tb_obk_anc(
@@ -114,10 +121,12 @@ void tb_obs_gen(
 	/* Derive @dst's start price. */
 	assert(anc >= (TB_LVL_OBS_NB >> 1));
 	const u64 dst_stt = anc - (TB_LVL_OBS_NB >> 1);
-	const u64 dst_end = dst_stt + TB_LVL_OBS_NB;
 
 	/* Report @dst's start price. */
 	tb_obs_set(dst, dst_stt); 
+
+	/* Reset @dst. */
+	ns_mem_rst(tb_obs_arr(dst), TB_LVL_OBS_NB * sizeof(f64));
 
 	/* Extract @dst's snapshot. */
 	assert(tb_obk_add(

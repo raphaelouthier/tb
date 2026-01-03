@@ -365,13 +365,13 @@ static inline void _vrf_hst_bac(
 	u64 bst_bid;
 	u64 bst_ask;
 	#define _get_bsts() ({\
-		tb_obk_bst_bat( \
+		assert(!tb_obk_bst_bat( \
 			obk, ctx->tck_nbr, \
 			0, ctx->tck_nbr, \
 			tck_min, \
 			&bst_bid, &bst_ask, \
 			0, 0 \
-		); \
+		)); \
 		assert(bst_bid < bst_ask); \
 		_bac_dbg("%I : %I\n", bst_bid, bst_ask); \
 	})

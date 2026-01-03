@@ -31,7 +31,7 @@ static inline u64 tb_obs_mid(
 /*
  * Return @obs's volume array.
  */
-static inline void *tb_obs_arr(
+static inline f64 *tb_obs_arr(
 	const void *obs
 ) {return ns_psum(obs, sizeof(u64));}
 
@@ -129,8 +129,8 @@ static inline uerr tb_obk_add(
 	check(its_stt >= src_stt);
 	check((its_stt == src_stt) || (its_stt == dst_stt));
 	const u64 dst_off = (its_stt - dst_stt); 
-	const u64 src_off = (its_stt - dst_stt); 
-	assert((!dst_off) || (!dst_off));
+	const u64 src_off = (its_stt - src_stt); 
+	assert((!dst_off) || (!src_off));
 	
 	/* Copy. */
 	ns_mem_cpy(dst + dst_off, src + src_off, (its_end - its_stt) * sizeof(f64));
@@ -144,6 +144,8 @@ static inline uerr tb_obk_add(
 /*
  * Update @obk of @nbr elements starting at @stt,
  * with an orderbook snapshot located at @obs 
+ * Elements of @obk which have no related elements
+ * in @obs are not initialized.
  */
 static inline uerr tb_obk_add_obs(
 	f64 *obk,
@@ -163,8 +165,10 @@ static inline uerr tb_obk_add_obs(
 }
 
 /*
- * Extract an orderbook snapshot locates at @obs
+ * Extract an orderbook snapshot located at @obs
  * from the ordebrook @obk of @nbr elements starting at @stt,
+ * Elements of @obs which have no related elements are
+ * not initialized.
  */
 static inline uerr tb_obk_xtr_obs(
 	const f64 *obk,
@@ -268,7 +272,9 @@ static inline uerr tb_obk_bst_bat(
 			bst_bid = tck_idx;
 
 			/* Detect inversion. */
-			if (was_ask) inv = 1;
+			if (was_ask) {
+				inv = 1;
+			}
 
 		}
 
